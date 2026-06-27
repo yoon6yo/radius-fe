@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useRoomStore } from '@/store/roomStore';
+import { useTransferStore } from '@/store/transferStore';
+import { TransferPanel } from '@/components/transfer/TransferPanel';
 import { ROOM_TTL_MS } from '@/constants/transfer';
 
 const PHASE_LABEL: Record<string, string> = {
@@ -20,19 +22,24 @@ export default function Room() {
   const { rejoinByToken } = useSignaling();
   const { token, role, phase, expiresAt, errorMessage } = useRoomStore();
   const { channelReady, isRelayed } = useWebRTC();
+  const { lockQueue } = useTransferStore();
 
-  // URL 토큰으로 자동 재진입 시도
   useEffect(() => {
     if (urlToken && !token) {
       void rejoinByToken(urlToken);
     }
   }, [urlToken, token, rejoinByToken]);
 
+  const handleStartTransfer = useCallback(() => {
+    lockQueue();
+    // 실제 전송 시작은 useSenderHash → startSending 흐름과 연결 (이후 통합 단계)
+  }, [lockQueue]);
+
   const remainingMs = expiresAt ? expiresAt - Date.now() : ROOM_TTL_MS;
   const remainingMin = Math.max(0, Math.floor(remainingMs / 60_000));
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white px-4">
+    <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white px-4 py-8">
       <div className="w-full max-w-md space-y-6">
         {/* 헤더 */}
         <div className="flex items-center justify-between">
@@ -53,9 +60,7 @@ export default function Room() {
           <p className="text-5xl font-mono font-bold tracking-[0.3em]">
             {urlToken ?? token ?? '------'}
           </p>
-          <p className="text-xs text-gray-600 break-all">
-            {window.location.href}
-          </p>
+          <p className="text-xs text-gray-600 break-all">{window.location.href}</p>
           <button
             onClick={() => void navigator.clipboard.writeText(window.location.href)}
             className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
@@ -70,7 +75,7 @@ export default function Room() {
             <div className="flex items-center gap-2">
               <StatusDot phase={channelReady ? 'peer_connected' : phase} />
               <span className="text-sm">
-                {channelReady ? 'DataChannel 연결됨' : PHASE_LABEL[phase] ?? phase}
+                {channelReady ? 'P2P 연결됨' : PHASE_LABEL[phase] ?? phase}
               </span>
             </div>
             {channelReady && isRelayed && (
@@ -81,17 +86,18 @@ export default function Room() {
           </div>
           {role && (
             <p className="text-xs text-gray-600">
-              역할: {role === 'offerer' ? '파일 보내기' : '파일 받기'}
+              역할: {role === 'offerer' ? '보내기' : '받기'}
             </p>
           )}
           {phase === 'peer_disconnected' && (
             <p className="text-sm text-yellow-400 mt-2">
               상대방이 연결을 끊었습니다. 룸은 {remainingMin}분 동안 유지됩니다.
+              상대방이 다시 연결하면 이어서 전송합니다.
             </p>
           )}
           {isRelayed && channelReady && (
             <p className="text-xs text-yellow-400/70">
-              현재 중계 서버를 통해 전송 중입니다 (직접 연결보다 느릴 수 있습니다)
+              중계 서버를 통해 전송 중입니다 (직접 연결보다 느릴 수 있습니다)
             </p>
           )}
           {phase === 'error' && (
@@ -99,10 +105,10 @@ export default function Room() {
           )}
         </div>
 
-        {/* 파일 전송 영역 (다음 단계에서 구현) */}
-        {channelReady && (
-          <div className="bg-gray-900 rounded-xl p-6 text-center text-gray-500 text-sm">
-            파일 전송 기능 구현 중…
+        {/* 파일 전송 패널 */}
+        {channelReady && role && (
+          <div className="bg-gray-900 rounded-xl p-4">
+            <TransferPanel role={role} onStartTransfer={handleStartTransfer} />
           </div>
         )}
       </div>
