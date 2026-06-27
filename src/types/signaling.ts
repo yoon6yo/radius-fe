@@ -2,15 +2,15 @@ export type PeerRole = 'offerer' | 'answerer';
 
 // ── Callback 응답 타입 ──────────────────────────────────────
 export type CreateRoomResult =
-  | { ok: true;  token: string; expiresAt: number }
+  | { ok: true;  token: string; role: PeerRole; expiresAt: number }
   | { ok: false; error: string };
 
 export type JoinRoomResult =
-  | { ok: true;  expiresAt: number }
+  | { ok: true;  role: PeerRole; expiresAt: number }
   | { ok: false; error: string };
 
 export type RejoinResult =
-  | { ok: true;  peerConnected: boolean; expiresAt: number }
+  | { ok: true;  role: PeerRole; peerConnected: boolean; expiresAt: number }
   | { ok: false; error: string };
 
 // ── Socket.io 페이로드 ──────────────────────────────────────
