@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import { useRoomStore } from '@/store/roomStore';
 import { ROOM_TTL_MS } from '@/constants/transfer';
 
@@ -18,6 +19,7 @@ export default function Room() {
   const navigate = useNavigate();
   const { rejoinByToken } = useSignaling();
   const { token, role, phase, expiresAt, errorMessage } = useRoomStore();
+  const { channelReady, isRelayed } = useWebRTC();
 
   // URL 토큰으로 자동 재진입 시도
   useEffect(() => {
@@ -64,9 +66,18 @@ export default function Room() {
 
         {/* 연결 상태 */}
         <div className="bg-gray-900 rounded-xl p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <StatusDot phase={phase} />
-            <span className="text-sm">{PHASE_LABEL[phase] ?? phase}</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <StatusDot phase={channelReady ? 'peer_connected' : phase} />
+              <span className="text-sm">
+                {channelReady ? 'DataChannel 연결됨' : PHASE_LABEL[phase] ?? phase}
+              </span>
+            </div>
+            {channelReady && isRelayed && (
+              <span className="text-xs text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded">
+                중계 서버 경유
+              </span>
+            )}
           </div>
           {role && (
             <p className="text-xs text-gray-600">
@@ -78,13 +89,18 @@ export default function Room() {
               상대방이 연결을 끊었습니다. 룸은 {remainingMin}분 동안 유지됩니다.
             </p>
           )}
+          {isRelayed && channelReady && (
+            <p className="text-xs text-yellow-400/70">
+              현재 중계 서버를 통해 전송 중입니다 (직접 연결보다 느릴 수 있습니다)
+            </p>
+          )}
           {phase === 'error' && (
             <p className="text-sm text-red-400 mt-2">{errorMessage}</p>
           )}
         </div>
 
         {/* 파일 전송 영역 (다음 단계에서 구현) */}
-        {phase === 'peer_connected' && (
+        {channelReady && (
           <div className="bg-gray-900 rounded-xl p-6 text-center text-gray-500 text-sm">
             파일 전송 기능 구현 중…
           </div>
