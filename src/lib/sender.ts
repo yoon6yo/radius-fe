@@ -5,13 +5,7 @@ import {
 } from '@/constants/transfer';
 import { buildChunk, calcTotalChunks } from '@/lib/chunkUtils';
 import type { PeerConnection } from '@/lib/webrtc';
-import type {
-  FileMeta,
-  HashPart,
-  HashDone,
-  TransferDone,
-  ResumeMsg,
-} from '@/types/transfer';
+import type { FileMeta, HashPart, HashDone, TransferDone } from '@/types/transfer';
 
 const HASHES_PER_PART = 1000;
 
@@ -32,7 +26,7 @@ export class FileSender {
     fileId: string,
     chunkHashes: string[],
     fileHash: string,
-    receivedIndices: Set<number>,
+    readySignal: Promise<Set<number>>, // READY/RESUME 수신 시 resolve
     onProgress: (sent: number) => void,
   ): Promise<void> {
     const totalChunks = calcTotalChunks(file.size);
@@ -66,7 +60,22 @@ export class FileSender {
     const hashDone: HashDone = { type: 'HASH_DONE', fileId, fileHash };
     this.pc.sendText(JSON.stringify(hashDone));
 
-    // 4. READY 또는 RESUME 응답 대기 후 청크 전송 (caller가 pendingIndices를 결정해서 전달)
+    // 4. 수신측 READY / RESUME 대기 후 청크 전송
+    //    abort 시에도 무한 대기가 되지 않도록 race
+    const receivedIndices = await Promise.race([
+      readySignal,
+      new Promise<null>((resolve) => {
+        const poll = setInterval(() => {
+          if (this.aborted) {
+            clearInterval(poll);
+            resolve(null);
+          }
+        }, 50);
+      }),
+    ]);
+
+    if (!receivedIndices || this.aborted) return;
+
     const pendingIndices: number[] = [];
     for (let i = 0; i < totalChunks; i++) {
       if (!receivedIndices.has(i)) pendingIndices.push(i);
@@ -115,10 +124,5 @@ export class FileSender {
 
       sendNext();
     });
-  }
-
-  // RESUME 메시지에서 receivedIndices를 추출하는 정적 헬퍼
-  static parseResume(msg: ResumeMsg): Set<number> {
-    return new Set(msg.receivedIndices);
   }
 }

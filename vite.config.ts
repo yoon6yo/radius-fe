@@ -1,4 +1,3 @@
-/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -17,22 +16,18 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-socket': ['socket.io-client'],
-          'vendor-state': ['zustand'],
+        manualChunks(id: string) {
+          if (id.includes('node_modules/react') || id.includes('react-router-dom')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/socket.io') || id.includes('node_modules/engine.io')) {
+            return 'vendor-socket';
+          }
+          if (id.includes('node_modules/zustand')) {
+            return 'vendor-state';
+          }
         },
       },
-    },
-  },
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./src/test/setup.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/lib/**', 'src/store/**', 'src/hooks/**'],
-      exclude: ['src/lib/socket.ts', 'src/workers/**'],
     },
   },
 });
