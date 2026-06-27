@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
+import { useBeforeUnload } from '@/hooks/useBeforeUnload';
 import { useRoomStore } from '@/store/roomStore';
 import { useTransferStore } from '@/store/transferStore';
 import { TransferPanel } from '@/components/transfer/TransferPanel';
@@ -24,6 +25,10 @@ export default function Room() {
   const { channelReady, isRelayed } = useWebRTC();
   const { lockQueue } = useTransferStore();
 
+  // 전송 중 탭 닫기 경고
+  useBeforeUnload();
+
+  // URL 토큰으로 자동 재진입 시도
   useEffect(() => {
     if (urlToken && !token) {
       void rejoinByToken(urlToken);
@@ -32,7 +37,6 @@ export default function Room() {
 
   const handleStartTransfer = useCallback(() => {
     lockQueue();
-    // 실제 전송 시작은 useSenderHash → startSending 흐름과 연결 (이후 통합 단계)
   }, [lockQueue]);
 
   const remainingMs = expiresAt ? expiresAt - Date.now() : ROOM_TTL_MS;
@@ -89,12 +93,18 @@ export default function Room() {
               역할: {role === 'offerer' ? '보내기' : '받기'}
             </p>
           )}
+
+          {/* 상대방 재연결 대기 안내 */}
           {phase === 'peer_disconnected' && (
-            <p className="text-sm text-yellow-400 mt-2">
-              상대방이 연결을 끊었습니다. 룸은 {remainingMin}분 동안 유지됩니다.
-              상대방이 다시 연결하면 이어서 전송합니다.
-            </p>
+            <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+              <p className="text-sm text-yellow-400 font-medium">상대방이 연결을 끊었습니다</p>
+              <p className="text-xs text-yellow-400/70 mt-1">
+                룸은 {remainingMin}분 동안 유지됩니다. 탭을 닫지 말고 대기하면
+                상대방이 돌아왔을 때 이어서 전송할 수 있습니다.
+              </p>
+            </div>
           )}
+
           {isRelayed && channelReady && (
             <p className="text-xs text-yellow-400/70">
               중계 서버를 통해 전송 중입니다 (직접 연결보다 느릴 수 있습니다)
@@ -105,8 +115,8 @@ export default function Room() {
           )}
         </div>
 
-        {/* 파일 전송 패널 */}
-        {channelReady && role && (
+        {/* 재연결 대기 중에도 TransferPanel 유지 (전송 상태 보존) */}
+        {(channelReady || phase === 'peer_disconnected') && role && (
           <div className="bg-gray-900 rounded-xl p-4">
             <TransferPanel role={role} onStartTransfer={handleStartTransfer} />
           </div>
