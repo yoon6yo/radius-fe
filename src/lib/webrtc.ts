@@ -138,6 +138,13 @@ export class PeerConnection {
     return this.pc.getStats();
   }
 
+  reconnect(): void {
+    this.pc.restartIce();
+    if (this.role === 'offerer') {
+      void this.createAndSendOffer();
+    }
+  }
+
   async isRelayed(): Promise<boolean> {
     const stats = await this.pc.getStats();
     for (const report of stats.values()) {
