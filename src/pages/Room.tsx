@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
@@ -22,7 +22,21 @@ export default function Room() {
   const navigate = useNavigate();
   const { rejoinByToken } = useSignaling();
   const { token, role, phase, expiresAt, errorMessage } = useRoomStore();
-  const { channelReady, isRelayed } = useWebRTC();
+  const { isLocked } = useTransferStore();
+  const [channelDropped, setChannelDropped] = useState(false);
+
+  const handleChannelClose = useCallback(
+    (reason: 'closed' | 'error') => {
+      if (isLocked) {
+        // 전송 진행 중에 채널이 끊기면 별도 알림
+        console.warn('[Room] DataChannel dropped during transfer:', reason);
+        setChannelDropped(true);
+      }
+    },
+    [isLocked],
+  );
+
+  const { channelReady, isRelayed } = useWebRTC({ onChannelClose: handleChannelClose });
   const { lockQueue } = useTransferStore();
 
   // 전송 중 탭 닫기 경고
@@ -34,6 +48,11 @@ export default function Room() {
       void rejoinByToken(urlToken);
     }
   }, [urlToken, token, rejoinByToken]);
+
+  // 채널 복구 시 드롭 알림 해제
+  useEffect(() => {
+    if (channelReady) setChannelDropped(false);
+  }, [channelReady]);
 
   const handleStartTransfer = useCallback(() => {
     lockQueue();
@@ -92,6 +111,17 @@ export default function Room() {
             <p className="text-xs text-gray-600">
               역할: {role === 'offerer' ? '보내기' : '받기'}
             </p>
+          )}
+
+          {/* DataChannel 드롭 감지 — 전송 중 채널 끊김 */}
+          {channelDropped && !channelReady && (
+            <div className="mt-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <p className="text-sm text-red-400 font-medium">전송 채널이 끊겼습니다</p>
+              <p className="text-xs text-red-400/70 mt-1">
+                P2P 연결을 복구하는 중입니다. 탭을 닫지 마세요.
+                복구되면 이어서 전송을 재개합니다.
+              </p>
+            </div>
           )}
 
           {/* 상대방 재연결 대기 안내 */}
