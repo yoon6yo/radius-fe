@@ -5,6 +5,11 @@ const DB_VERSION = 1;
 
 let db: IDBDatabase | null = null;
 
+/** @internal 테스트 전용: 모듈 싱글턴 DB 연결 초기화 */
+export function _resetDB(): void {
+  db = null;
+}
+
 export async function openDB(): Promise<IDBDatabase> {
   if (db) return db;
 
