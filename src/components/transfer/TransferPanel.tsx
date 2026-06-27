@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { FileDropZone } from './FileDropZone';
 import { FileQueueItem } from './FileQueueItem';
+import { TransferComplete } from './TransferComplete';
 import { useTransferStore } from '@/store/transferStore';
 
 interface TransferPanelProps {
@@ -9,7 +10,7 @@ interface TransferPanelProps {
 }
 
 export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
-  const { queue, currentIndex, isLocked, addFiles, removeFile } = useTransferStore();
+  const { queue, currentIndex, isLocked, addFiles, removeFile, reset } = useTransferStore();
 
   const handleFiles = useCallback(
     (files: File[]) => {
@@ -21,20 +22,22 @@ export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
 
   const canStart = !isLocked && queue.length > 0 && role === 'offerer';
   const totalDone = queue.filter((f) => f.status === 'done').length;
-  const isAllDone = isLocked && totalDone === queue.length;
+  const isAllDone = isLocked && queue.length > 0 && totalDone === queue.length;
+
+  if (isAllDone) {
+    return <TransferComplete totalFiles={queue.length} onReset={reset} />;
+  }
 
   return (
     <div className="space-y-4">
-      {/* 헤더 */}
-      {isLocked && (
+      {/* 전송 진행 헤더 */}
+      {isLocked && queue.length > 0 && (
         <div className="text-sm text-gray-400 text-center">
-          {isAllDone
-            ? `전송 완료 (${queue.length}개 파일)`
-            : `${totalDone + 1} / ${queue.length} 번째 파일 전송 중`}
+          {currentIndex + 1} / {queue.length} 번째 파일 전송 중
         </div>
       )}
 
-      {/* 파일 선택 (잠금 전만) */}
+      {/* 파일 선택 영역 */}
       {!isLocked && role === 'offerer' && (
         <FileDropZone onFiles={handleFiles} disabled={isLocked} />
       )}
@@ -75,7 +78,7 @@ export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
       {/* OPFS quota 안내 */}
       {role === 'answerer' && (
         <p className="text-xs text-gray-600 text-center">
-          수신된 파일은 브라우저 내부 저장소에 임시 저장됩니다. 브라우저 데이터를 지우면
+          수신 파일은 브라우저 내부 저장소에 임시 저장됩니다. 브라우저 데이터를 지우면
           수신 중인 파일이 사라질 수 있습니다.
         </p>
       )}
