@@ -47,8 +47,8 @@ export function useSignaling() {
             socket.disconnect();
             return;
           }
-          setRoom(session.token, session.role, result.expiresAt);
-          void saveSession({ ...session, expiresAt: result.expiresAt });
+          setRoom(session.token, result.role, result.expiresAt);
+          void saveSession({ ...session, role: result.role, expiresAt: result.expiresAt });
           if (result.peerConnected) {
             setPhase('peer_connected');
           }
@@ -79,9 +79,9 @@ export function useSignaling() {
         setError(result.error);
         return;
       }
-      const { token: newToken, expiresAt } = result;
-      await saveSession({ token: newToken, role: 'offerer', expiresAt });
-      setRoom(newToken, 'offerer', expiresAt);
+      const { token: newToken, role: newRole, expiresAt } = result;
+      await saveSession({ token: newToken, role: newRole, expiresAt });
+      setRoom(newToken, newRole, expiresAt);
       void navigate(`/r/${newToken}`);
     });
   }, [navigate, setError, setIceServers, setPhase, setRoom]);
@@ -106,10 +106,10 @@ export function useSignaling() {
         }
         await saveSession({
           token: roomToken.toUpperCase(),
-          role: 'answerer',
+          role: result.role,
           expiresAt: result.expiresAt,
         });
-        setRoom(roomToken.toUpperCase(), 'answerer', result.expiresAt);
+        setRoom(roomToken.toUpperCase(), result.role, result.expiresAt);
         void navigate(`/r/${roomToken.toUpperCase()}`);
       });
     },
@@ -137,8 +137,8 @@ export function useSignaling() {
           setError(result.error);
           return;
         }
-        setRoom(roomToken, session.role, result.expiresAt);
-        void saveSession({ ...session, expiresAt: result.expiresAt });
+        setRoom(roomToken, result.role, result.expiresAt);
+        void saveSession({ ...session, role: result.role, expiresAt: result.expiresAt });
         if (result.peerConnected) setPhase('peer_connected');
       });
     },
