@@ -106,7 +106,7 @@ export async function getTransfer(fileId: string): Promise<TransferRecord | null
 
 export async function updateReceivedIndices(
   fileId: string,
-  receivedIndices: number[],
+  newIndices: number[],
 ): Promise<void> {
   const database = await openDB();
   return new Promise((resolve, reject) => {
@@ -115,7 +115,9 @@ export async function updateReceivedIndices(
     getReq.onsuccess = () => {
       const record = getReq.result as TransferRecord | undefined;
       if (!record) return resolve();
-      const putReq = store.put({ ...record, receivedIndices });
+      // 기존 인덱스에 새 인덱스를 병합 (replace가 아닌 append)
+      const merged = Array.from(new Set([...record.receivedIndices, ...newIndices]));
+      const putReq = store.put({ ...record, receivedIndices: merged });
       putReq.onsuccess = () => resolve();
       putReq.onerror = () => reject(putReq.error);
     };
