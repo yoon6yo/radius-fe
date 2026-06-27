@@ -20,20 +20,24 @@ interface FileReceiveState {
 
 interface UseFileReceiverOptions {
   sendControl: (msg: ControlMessage) => void;
-  // Web Worker에서 청크 해시 검증 — 검증 통과 시 true 반환
   verifyChunkHash: (fileId: string, chunkIndex: number, data: ArrayBuffer) => Promise<boolean>;
-  // 전체 파일 해시 검증
-  verifyFileHash: (fileId: string, fileName: string) => Promise<boolean>;
+  verifyFileHash: (fileId: string, fileName: string, expectedHash: string) => Promise<boolean>;
+  // IndexedDB 비트맵 영속화 연동
+  onChunkVerified?: (fileId: string, chunkIndex: number) => void;
+  onTransferComplete?: (fileId: string) => Promise<void>;
+  getRestoredIndices?: (fileId: string) => Promise<number[]>;
 }
 
 export function useFileReceiver({
   sendControl,
   verifyChunkHash,
   verifyFileHash,
+  onChunkVerified,
+  onTransferComplete,
+  getRestoredIndices,
 }: UseFileReceiverOptions) {
   const writerRef = useRef<FileWriter | null>(null);
   const receivedBitmap = useRef<Set<number>>(new Set());
-  const hashPartsReceived = useRef(0);
   const chunkHashesRef = useRef<string[]>([]);
   const fileHashRef = useRef('');
   const metaRef = useRef<FileMeta | null>(null);
@@ -49,15 +53,19 @@ export function useFileReceiver({
   const handleControl = useCallback(
     async (msg: ControlMessage) => {
       if (msg.type === 'FILE_META') {
-        receivedBitmap.current = new Set();
-        hashPartsReceived.current = 0;
         chunkHashesRef.current = [];
         fileHashRef.current = '';
         metaRef.current = msg;
 
+        // IndexedDB에서 이전 수신 인덱스 복원
+        const restored = getRestoredIndices
+          ? await getRestoredIndices(msg.fileId)
+          : [];
+        receivedBitmap.current = new Set(restored);
+
         setState({
           meta: msg,
-          receivedCount: 0,
+          receivedCount: restored.length,
           exportPhase: 'receiving',
           exportError: null,
         });
@@ -68,7 +76,6 @@ export function useFileReceiver({
 
       if (msg.type === 'HASH_PART') {
         chunkHashesRef.current.push(...msg.hashes);
-        hashPartsReceived.current++;
         return;
       }
 
@@ -88,26 +95,34 @@ export function useFileReceiver({
         await handleTransferDone(msg);
       }
     },
-    [sendControl],
+    [sendControl, getRestoredIndices],
   );
 
   // ── 바이너리 청크 처리 + 해시 검증 ─────────────────────────
   const handleBinaryChunk = useCallback(
     async (buffer: ArrayBuffer) => {
       const { chunkIndex, data } = parseChunk(buffer);
-      const offset = chunkIndex * CHUNK_SIZE;
 
+      // 이미 받은 청크는 건너뜀 (이어받기 시나리오)
+      if (receivedBitmap.current.has(chunkIndex)) return;
+
+      const offset = chunkIndex * CHUNK_SIZE;
       await writerRef.current?.write(data, offset);
 
-      // Web Worker에서 해시 검증 — 통과 시에만 비트맵 기록
-      const valid = await verifyChunkHash(metaRef.current?.fileId ?? '', chunkIndex, data);
+      const valid = await verifyChunkHash(
+        metaRef.current?.fileId ?? '',
+        chunkIndex,
+        data,
+      );
+
       if (valid) {
         receivedBitmap.current.add(chunkIndex);
+        onChunkVerified?.(metaRef.current?.fileId ?? '', chunkIndex);
         setState((s) => ({ ...s, receivedCount: receivedBitmap.current.size }));
       }
-      // 검증 실패 시 비트맵에 기록하지 않음 → 재연결 시 자동으로 재요청 대상 포함
+      // 검증 실패 → 비트맵 미기록 → 재연결 시 자동 재요청 대상
     },
-    [verifyChunkHash],
+    [verifyChunkHash, onChunkVerified],
   );
 
   // ── 전송 완료 처리 ──────────────────────────────────────────
@@ -121,8 +136,12 @@ export function useFileReceiver({
     setState((s) => ({ ...s, exportPhase: 'exporting' }));
 
     try {
-      // 전체 파일 해시 검증
-      const fileValid = await verifyFileHash(msg.fileId, meta.fileName);
+      const fileValid = await verifyFileHash(
+        msg.fileId,
+        meta.fileName,
+        fileHashRef.current,
+      );
+
       if (!fileValid) {
         console.error('[Receiver] 전체 파일 해시 불일치 — 클라이언트 로직 버그 의심', {
           fileId: msg.fileId,
@@ -144,6 +163,7 @@ export function useFileReceiver({
       }
 
       await exportFromOPFS(meta.fileName);
+      await onTransferComplete?.(msg.fileId);
 
       sendControl({ type: 'VERIFY_OK', fileId: msg.fileId });
       setState((s) => ({ ...s, exportPhase: 'done' }));
@@ -155,7 +175,6 @@ export function useFileReceiver({
     }
   };
 
-  // 외부에서 접근 가능한 비트맵 (IndexedDB 저장용 — 다음 단계)
   const getReceivedIndices = useCallback(() => [...receivedBitmap.current], []);
   const getChunkHashes = useCallback(() => chunkHashesRef.current, []);
   const getFileHash = useCallback(() => fileHashRef.current, []);
