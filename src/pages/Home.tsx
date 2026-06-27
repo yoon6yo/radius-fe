@@ -1,13 +1,14 @@
 import { useState, useCallback } from 'react';
 import { useSignaling } from '@/hooks/useSignaling';
+import { useResumeDetection } from '@/hooks/useResumeDetection';
+import { ResumeBanner } from '@/components/ui/ResumeBanner';
 import { TOKEN_ALPHABET } from '@/constants/transfer';
 
-const TOKEN_PATTERN = new RegExp(
-  `^[${TOKEN_ALPHABET}]{6,}$`,
-);
+const TOKEN_PATTERN = new RegExp(`^[${TOKEN_ALPHABET}]{6,}$`);
 
 export default function Home() {
   const { createRoom, joinRoom } = useSignaling();
+  const { resumeInfo, dismiss } = useResumeDetection();
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -34,15 +35,20 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white px-4">
+      {resumeInfo && (
+        <ResumeBanner
+          session={resumeInfo.session}
+          pendingTransfers={resumeInfo.pendingTransfers}
+          onDismiss={dismiss}
+        />
+      )}
+
       <div className="w-full max-w-sm space-y-8">
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold tracking-tight">Radius</h1>
-          <p className="text-gray-400 text-sm">
-            서버를 거치지 않는 P2P 파일 공유
-          </p>
+          <p className="text-gray-400 text-sm">서버를 거치지 않는 P2P 파일 공유</p>
         </div>
 
-        {/* 룸 생성 */}
         <button
           onClick={() => void handleCreate()}
           disabled={isCreating}
@@ -60,7 +66,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 핀 번호로 참여 */}
         <form onSubmit={(e) => void handleJoin(e)} className="space-y-3">
           <div>
             <input
@@ -71,9 +76,7 @@ export default function Home() {
               maxLength={20}
               className="w-full py-3 px-4 bg-gray-900 border border-gray-700 rounded-lg text-center tracking-widest text-lg font-mono placeholder:text-gray-600 focus:outline-none focus:border-indigo-500"
             />
-            {pinError && (
-              <p className="mt-1 text-sm text-red-400">{pinError}</p>
-            )}
+            {pinError && <p className="mt-1 text-sm text-red-400">{pinError}</p>}
           </div>
           <button
             type="submit"
