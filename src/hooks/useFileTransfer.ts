@@ -2,32 +2,42 @@ import { useCallback, useRef } from 'react';
 import { useTransferStore } from '@/store/transferStore';
 import { useRoomStore } from '@/store/roomStore';
 import { FileSender } from '@/lib/sender';
-import {} from '@/lib/chunkUtils';
 import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
 import type { PeerConnection } from '@/lib/webrtc';
-import type {
-  ControlMessage,
-  ReadyMsg,
-  ResumeMsg,
-  QueuedFile,
-} from '@/types/transfer';
+import type { ReadyMsg, ResumeMsg, QueuedFile } from '@/types/transfer';
 
 interface UseFileTransferOptions {
   getPeerConnection: () => PeerConnection | null;
-  sendControl: (msg: ControlMessage) => void;
 }
 
-export function useFileTransfer({ getPeerConnection, sendControl }: UseFileTransferOptions) {
+export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
   const { queue, currentIndex, lockQueue, updateFileStatus, updateProgress, advanceQueue } =
     useTransferStore();
   const { role } = useRoomStore();
+
   const senderRef = useRef<FileSender | null>(null);
   const progressTimerRef = useRef<number>(0);
   const lastProgressRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
 
-  // ── 송신 측: 파일 전송 시작 ──────────────────────────────
+  // fileId → readySignal resolver (HASH_DONE 후 READY/RESUME 대기)
+  const readyResolversRef = useRef<Map<string, (indices: Set<number>) => void>>(new Map());
+
+  // ── 수신측에서 READY/RESUME 메시지가 오면 Promise를 resolve ──────
+  const resolveReady = useCallback((msg: ReadyMsg | ResumeMsg) => {
+    const resolver = readyResolversRef.current.get(msg.fileId);
+    if (!resolver) return;
+    readyResolversRef.current.delete(msg.fileId);
+    const indices =
+      msg.type === 'RESUME' ? new Set(msg.receivedIndices) : new Set<number>();
+    resolver(indices);
+  }, []);
+
+  // ── 송신 측: 파일 전송 시작 ──────────────────────────────────────
   const startSending = useCallback(
-    async (chunkHashesByFileId: Map<string, string[]>, fileHashByFileId: Map<string, string>) => {
+    async (
+      chunkHashesByFileId: Map<string, string[]>,
+      fileHashByFileId: Map<string, string>,
+    ) => {
       if (role !== 'offerer') return;
       lockQueue();
 
@@ -41,15 +51,21 @@ export function useFileTransfer({ getPeerConnection, sendControl }: UseFileTrans
         const sender = new FileSender(pc);
         senderRef.current = sender;
 
+        // readySignal 생성: FILE_META 전송 전에 등록해야 경쟁 조건 없음
+        const readySignal = new Promise<Set<number>>((resolve) => {
+          readyResolversRef.current.set(item.fileId, resolve);
+        });
+
         const chunkHashes = chunkHashesByFileId.get(item.fileId) ?? [];
         const fileHash = fileHashByFileId.get(item.fileId) ?? '';
 
+        updateFileStatus(item.fileId, 'transferring');
         await sender.sendFile(
           item.file,
           item.fileId,
           chunkHashes,
           fileHash,
-          new Set<number>(),
+          readySignal,
           (sent) => throttleProgress(item.fileId, sent, item.totalChunks),
         );
 
@@ -60,43 +76,7 @@ export function useFileTransfer({ getPeerConnection, sendControl }: UseFileTrans
     [role, queue, currentIndex, lockQueue, updateFileStatus, advanceQueue, getPeerConnection],
   );
 
-  // ── 수신 측: READY/RESUME 처리 ───────────────────────────
-  const handleReadyOrResume = useCallback(
-    (msg: ReadyMsg | ResumeMsg) => {
-      const receivedSet =
-        msg.type === 'RESUME' ? new Set(msg.receivedIndices) : new Set<number>();
-
-      const item = queue.find((f) => f.fileId === msg.fileId);
-      if (!item) return;
-
-      sendControl({
-        type: 'READY',
-        fileId: msg.fileId,
-      });
-
-      void (async () => {
-        const pc = getPeerConnection();
-        if (!pc) return;
-        const sender = new FileSender(pc);
-        senderRef.current = sender;
-
-        const chunkHashes: string[] = [];
-        const fileHash = '';
-
-        await sender.sendFile(
-          item.file,
-          item.fileId,
-          chunkHashes,
-          fileHash,
-          receivedSet,
-          (sent) => throttleProgress(item.fileId, sent, item.totalChunks),
-        );
-      })();
-    },
-    [queue, sendControl, getPeerConnection],
-  );
-
-  // ── 진행률 throttle ──────────────────────────────────────
+  // ── 진행률 throttle ──────────────────────────────────────────────
   const throttleProgress = (fileId: string, sent: number, totalChunks: number) => {
     const now = Date.now();
     const last = lastProgressRef.current;
@@ -116,5 +96,5 @@ export function useFileTransfer({ getPeerConnection, sendControl }: UseFileTrans
     }, 0);
   };
 
-  return { startSending, handleReadyOrResume };
+  return { startSending, resolveReady };
 }
