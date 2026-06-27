@@ -10,11 +10,14 @@ interface UseWebRTCOptions {
   onChannelClose?: ChannelCloseHandler;
 }
 
+const RECONNECT_INTERVAL_MS = 10_000;
+
 export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: UseWebRTCOptions = {}) {
   const { iceServers, role } = useRoomStore();
   const pcRef = useRef<PeerConnection | null>(null);
   const [channelReady, setChannelReady] = useState(false);
   const [isRelayed, setIsRelayed] = useState(false);
+  const reconnectTimerRef = useRef<number>(0);
 
   const handleMessage = useCallback(
     (event: MessageEvent) => {
@@ -78,6 +81,22 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
       setChannelReady(false);
     };
   }, [role, iceServers, handleMessage, handleConnectionState, handleChannelOpen, handleChannelClose]);
+
+  // 채널이 끊기면 10초마다 재연결 시도
+  useEffect(() => {
+    if (channelReady) {
+      clearInterval(reconnectTimerRef.current);
+      return;
+    }
+    if (!pcRef.current) return;
+
+    reconnectTimerRef.current = window.setInterval(() => {
+      console.log('[WebRTC] 재연결 시도 중...');
+      pcRef.current?.reconnect();
+    }, RECONNECT_INTERVAL_MS);
+
+    return () => clearInterval(reconnectTimerRef.current);
+  }, [channelReady]);
 
   const sendControl = useCallback((msg: ControlMessage) => {
     pcRef.current?.sendText(JSON.stringify(msg));
