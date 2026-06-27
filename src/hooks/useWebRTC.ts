@@ -1,14 +1,16 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { PeerConnection } from '@/lib/webrtc';
 import { useRoomStore } from '@/store/roomStore';
+import type { ChannelCloseHandler } from '@/lib/webrtc';
 import type { ControlMessage } from '@/types/transfer';
 
 interface UseWebRTCOptions {
   onControlMessage?: (msg: ControlMessage) => void;
   onBinaryChunk?: (buffer: ArrayBuffer) => void;
+  onChannelClose?: ChannelCloseHandler;
 }
 
-export function useWebRTC({ onControlMessage, onBinaryChunk }: UseWebRTCOptions = {}) {
+export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: UseWebRTCOptions = {}) {
   const { iceServers, role } = useRoomStore();
   const pcRef = useRef<PeerConnection | null>(null);
   const [channelReady, setChannelReady] = useState(false);
@@ -48,6 +50,14 @@ export function useWebRTC({ onControlMessage, onBinaryChunk }: UseWebRTCOptions 
     setChannelReady(true);
   }, []);
 
+  const handleChannelClose = useCallback(
+    (reason: 'closed' | 'error') => {
+      setChannelReady(false);
+      onChannelClose?.(reason);
+    },
+    [onChannelClose],
+  );
+
   // role이 확정된 시점에 PeerConnection 생성
   useEffect(() => {
     if (!role || iceServers.length === 0) return;
@@ -59,6 +69,7 @@ export function useWebRTC({ onControlMessage, onBinaryChunk }: UseWebRTCOptions 
       onMessage: handleMessage,
       onConnectionState: handleConnectionState,
       onChannelOpen: handleChannelOpen,
+      onChannelClose: handleChannelClose,
     });
 
     return () => {
@@ -66,7 +77,7 @@ export function useWebRTC({ onControlMessage, onBinaryChunk }: UseWebRTCOptions 
       pcRef.current = null;
       setChannelReady(false);
     };
-  }, [role, iceServers, handleMessage, handleConnectionState, handleChannelOpen]);
+  }, [role, iceServers, handleMessage, handleConnectionState, handleChannelOpen, handleChannelClose]);
 
   const sendControl = useCallback((msg: ControlMessage) => {
     pcRef.current?.sendText(JSON.stringify(msg));
