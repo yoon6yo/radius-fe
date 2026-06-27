@@ -4,6 +4,7 @@ import type { SdpPayload, IceCandidatePayload } from '@/types/signaling';
 export type DataChannelMessageHandler = (event: MessageEvent) => void;
 export type ConnectionStateHandler = (state: RTCPeerConnectionState) => void;
 export type ChannelOpenHandler = () => void;
+export type ChannelCloseHandler = (reason: 'closed' | 'error') => void;
 
 interface PeerConnectionOptions {
   iceServers: RTCIceServer[];
@@ -11,6 +12,7 @@ interface PeerConnectionOptions {
   onMessage: DataChannelMessageHandler;
   onConnectionState: ConnectionStateHandler;
   onChannelOpen: ChannelOpenHandler;
+  onChannelClose?: ChannelCloseHandler;
 }
 
 export class PeerConnection {
@@ -20,12 +22,14 @@ export class PeerConnection {
   private readonly onMessage: DataChannelMessageHandler;
   private readonly onConnectionState: ConnectionStateHandler;
   private readonly onChannelOpen: ChannelOpenHandler;
+  private readonly onChannelClose?: ChannelCloseHandler;
 
   constructor(options: PeerConnectionOptions) {
     this.role = options.role;
     this.onMessage = options.onMessage;
     this.onConnectionState = options.onConnectionState;
     this.onChannelOpen = options.onChannelOpen;
+    this.onChannelClose = options.onChannelClose;
 
     this.pc = new RTCPeerConnection({ iceServers: options.iceServers });
     this.setupPeerConnectionListeners();
@@ -69,6 +73,8 @@ export class PeerConnection {
   private setupChannelListeners(ch: RTCDataChannel) {
     ch.onopen = () => this.onChannelOpen();
     ch.onmessage = (event) => this.onMessage(event);
+    ch.onclose = () => this.onChannelClose?.('closed');
+    ch.onerror = () => this.onChannelClose?.('error');
   }
 
   private setupSignalingListeners() {
