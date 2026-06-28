@@ -124,11 +124,14 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
     pcRef.current?.onBufferedAmountLow(handler);
   }, []);
 
+  const getPeerConnection = useCallback(() => pcRef.current, []);
+
   return {
     channelReady,
     isRelayed,
     sendControl,
     sendBinary,
+    getPeerConnection,
     getBufferedAmount,
     setBufferedAmountLowThreshold,
     onBufferedAmountLow,
