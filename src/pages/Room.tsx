@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
-import { useWebRTC } from '@/hooks/useWebRTC';
+import { useRoomTransfer } from '@/hooks/useRoomTransfer';
 import { useBeforeUnload } from '@/hooks/useBeforeUnload';
 import { useRoomStore } from '@/store/roomStore';
 import { useTransferStore } from '@/store/transferStore';
@@ -36,7 +36,7 @@ export default function Room() {
     [isLocked],
   );
 
-  const { channelReady, isRelayed } = useWebRTC({ onChannelClose: handleChannelClose });
+  const { channelReady, isRelayed } = useRoomTransfer({ onChannelClose: handleChannelClose });
   const { lockQueue } = useTransferStore();
 
   // 전송 중 탭 닫기 경고
