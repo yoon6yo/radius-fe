@@ -75,6 +75,11 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
       onChannelClose: handleChannelClose,
     });
 
+    // offerer가 재연결했을 때 peer가 이미 방에 있으면 즉시 offer 전송 (Bug 1)
+    if (role === 'offerer' && useRoomStore.getState().phase === 'peer_connected') {
+      pcRef.current.triggerOffer();
+    }
+
     return () => {
       pcRef.current?.destroy();
       pcRef.current = null;

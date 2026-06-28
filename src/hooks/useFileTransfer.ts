@@ -3,6 +3,7 @@ import { useTransferStore } from '@/store/transferStore';
 import { useRoomStore } from '@/store/roomStore';
 import { FileSender } from '@/lib/sender';
 import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
+import { calcTotalChunks } from '@/lib/chunkUtils';
 import type { PeerConnection } from '@/lib/webrtc';
 import type { ReadyMsg, ResumeMsg, QueuedFile } from '@/types/transfer';
 
@@ -58,15 +59,17 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
 
         const chunkHashes = chunkHashesByFileId.get(item.fileId) ?? [];
         const fileHash = fileHashByFileId.get(item.fileId) ?? '';
+        const totalChunks = calcTotalChunks(item.file.size);
 
         updateFileStatus(item.fileId, 'transferring');
+        updateProgress(item.fileId, { totalChunks });  // 진행률 바 활성화 (Bug 5)
         await sender.sendFile(
           item.file,
           item.fileId,
           chunkHashes,
           fileHash,
           readySignal,
-          (sent) => throttleProgress(item.fileId, sent, item.totalChunks),
+          (sent) => throttleProgress(item.fileId, sent, totalChunks),
         );
 
         updateFileStatus(item.fileId, 'done');

@@ -98,6 +98,9 @@ export class FileSender {
   ): Promise<void> {
     this.pc.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD;
 
+    // pending을 공유해 sendNext 재호출(백프레셔) 시에도 모든 프로미스를 추적
+    const pending: Promise<void>[] = [];
+
     return new Promise((resolve) => {
       let cursor = 0;
 
@@ -112,14 +115,18 @@ export class FileSender {
           const start = chunkIndex * CHUNK_SIZE;
           const slice = file.slice(start, start + CHUNK_SIZE);
 
-          void slice.arrayBuffer().then((data) => {
+          const p = slice.arrayBuffer().then((data) => {
             const packet = buildChunk(chunkIndex, data);
             this.pc.sendBinary(packet);
             onProgress(cursor);
           });
+          pending.push(p);
         }
 
-        if (cursor >= indices.length || this.aborted) resolve();
+        // 모든 arrayBuffer → sendBinary가 끝난 뒤 resolve (Bug 4)
+        if (cursor >= indices.length || this.aborted) {
+          void Promise.all(pending).then(() => resolve());
+        }
       };
 
       sendNext();

@@ -4,7 +4,7 @@ import { useResumeDetection } from '@/hooks/useResumeDetection';
 import { ResumeBanner } from '@/components/ui/ResumeBanner';
 import { TOKEN_ALPHABET } from '@/constants/transfer';
 
-const TOKEN_PATTERN = new RegExp(`^[${TOKEN_ALPHABET}]{6,}$`);
+const TOKEN_PATTERN = new RegExp(`^[${TOKEN_ALPHABET}]{6}$`);
 
 export default function Home() {
   const { createRoom, joinRoom } = useSignaling();
