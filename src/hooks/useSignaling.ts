@@ -33,6 +33,9 @@ export function useSignaling() {
   // ── 페이지 로드 시 미완료 세션 확인 ─────────────────────────
   useEffect(() => {
     void (async () => {
+      // /r/ 경로에서는 Room.tsx의 rejoinByToken이 처리하므로 중복 실행 방지 (Bug 2)
+      if (window.location.pathname.startsWith('/r/')) return;
+
       const session = await getActiveSession();
       if (!session) return;
 

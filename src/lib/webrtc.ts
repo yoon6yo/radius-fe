@@ -24,6 +24,13 @@ export class PeerConnection {
   private readonly onChannelOpen: ChannelOpenHandler;
   private readonly onChannelClose?: ChannelCloseHandler;
 
+  // handler 참조를 보관해서 destroy()에서 특정 함수만 제거 (Bug 3)
+  private readonly handleOffer: (data: SdpPayload) => void;
+  private readonly handleAnswer: (data: SdpPayload) => void;
+  private readonly handleIceCandidate: (data: IceCandidatePayload) => void;
+  private readonly handlePeerJoined: () => void;
+  private readonly handlePeerReconnected: () => void;
+
   constructor(options: PeerConnectionOptions) {
     this.role = options.role;
     this.onMessage = options.onMessage;
@@ -45,6 +52,32 @@ export class PeerConnection {
         this.setupChannelListeners(this.channel);
       };
     }
+
+    // Arrow function으로 this를 캡처해 인스턴스별 독립 참조 생성
+    this.handleOffer = async ({ sdp }: SdpPayload) => {
+      await this.pc.setRemoteDescription(sdp);
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+      socket.emit('answer', { sdp: answer });
+    };
+
+    this.handleAnswer = async ({ sdp }: SdpPayload) => {
+      await this.pc.setRemoteDescription(sdp);
+    };
+
+    this.handleIceCandidate = async ({ candidate }: IceCandidatePayload) => {
+      await this.pc.addIceCandidate(candidate);
+    };
+
+    this.handlePeerJoined = async () => {
+      if (this.role !== 'offerer') return;
+      await this.createAndSendOffer();
+    };
+
+    this.handlePeerReconnected = async () => {
+      if (this.role !== 'offerer') return;
+      await this.createAndSendOffer();
+    };
 
     this.setupSignalingListeners();
   }
@@ -78,30 +111,11 @@ export class PeerConnection {
   }
 
   private setupSignalingListeners() {
-    socket.on('offer', async ({ sdp }: SdpPayload) => {
-      await this.pc.setRemoteDescription(sdp);
-      const answer = await this.pc.createAnswer();
-      await this.pc.setLocalDescription(answer);
-      socket.emit('answer', { sdp: answer });
-    });
-
-    socket.on('answer', async ({ sdp }: SdpPayload) => {
-      await this.pc.setRemoteDescription(sdp);
-    });
-
-    socket.on('ice-candidate', async ({ candidate }: IceCandidatePayload) => {
-      await this.pc.addIceCandidate(candidate);
-    });
-
-    socket.on('peer-joined', async () => {
-      if (this.role !== 'offerer') return;
-      await this.createAndSendOffer();
-    });
-
-    socket.on('peer-reconnected', async () => {
-      if (this.role !== 'offerer') return;
-      await this.createAndSendOffer();
-    });
+    socket.on('offer', this.handleOffer);
+    socket.on('answer', this.handleAnswer);
+    socket.on('ice-candidate', this.handleIceCandidate);
+    socket.on('peer-joined', this.handlePeerJoined);
+    socket.on('peer-reconnected', this.handlePeerReconnected);
   }
 
   private async createAndSendOffer() {
@@ -111,6 +125,12 @@ export class PeerConnection {
   }
 
   // ── Public API ───────────────────────────────────────────
+
+  // offerer가 재연결할 때 peer가 이미 연결된 경우 직접 호출 (Bug 1)
+  triggerOffer(): void {
+    if (this.role !== 'offerer') return;
+    void this.createAndSendOffer();
+  }
 
   sendText(message: string) {
     if (!this.channel || this.channel.readyState !== 'open') return;
@@ -163,11 +183,12 @@ export class PeerConnection {
   }
 
   destroy() {
-    socket.off('offer');
-    socket.off('answer');
-    socket.off('ice-candidate');
-    socket.off('peer-joined');
-    socket.off('peer-reconnected');
+    // 이 인스턴스가 등록한 handler만 제거 (다른 리스너 보존)
+    socket.off('offer', this.handleOffer);
+    socket.off('answer', this.handleAnswer);
+    socket.off('ice-candidate', this.handleIceCandidate);
+    socket.off('peer-joined', this.handlePeerJoined);
+    socket.off('peer-reconnected', this.handlePeerReconnected);
     this.channel?.close();
     this.pc.close();
   }

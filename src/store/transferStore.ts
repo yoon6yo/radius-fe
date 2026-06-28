@@ -12,7 +12,7 @@ interface TransferState {
   updateFileStatus: (fileId: string, status: TransferStatus) => void;
   updateProgress: (
     fileId: string,
-    delta: { sentChunks?: number; receivedChunks?: number; speedBps?: number; etaSeconds?: number }
+    delta: { totalChunks?: number; sentChunks?: number; receivedChunks?: number; speedBps?: number; etaSeconds?: number }
   ) => void;
   advanceQueue: () => void;
   reset: () => void;
