@@ -11,22 +11,18 @@ export function useSignaling() {
 
   // ── 소켓 이벤트 등록 ────────────────────────────────────────
   useEffect(() => {
-    socket.on('peer-joined', () => {
-      setPhase('peer_connected');
-    });
+    const onPeerJoined = () => setPhase('peer_connected');
+    const onPeerReconnected = () => setPhase('peer_connected');
+    const onPeerDisconnected = () => setPhase('peer_disconnected');
 
-    socket.on('peer-reconnected', () => {
-      setPhase('peer_connected');
-    });
-
-    socket.on('peer-disconnected', () => {
-      setPhase('peer_disconnected');
-    });
+    socket.on('peer-joined', onPeerJoined);
+    socket.on('peer-reconnected', onPeerReconnected);
+    socket.on('peer-disconnected', onPeerDisconnected);
 
     return () => {
-      socket.off('peer-joined');
-      socket.off('peer-reconnected');
-      socket.off('peer-disconnected');
+      socket.off('peer-joined', onPeerJoined);
+      socket.off('peer-reconnected', onPeerReconnected);
+      socket.off('peer-disconnected', onPeerDisconnected);
     };
   }, [setPhase]);
 
