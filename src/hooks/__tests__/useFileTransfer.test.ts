@@ -10,6 +10,7 @@ let capturedReadySignal: Promise<Set<number>> | null = null;
 
 vi.mock('@/lib/sender', () => {
   class FileSender {
+    get isAborted() { return false; }
     async sendFile(
       _file: File,
       _id: string,
@@ -59,10 +60,13 @@ describe('resolveReady', () => {
       new Map([[fileId, '']]),
     );
 
-    // readySignal이 등록된 후 READY로 해소
+    // readySignal 등록 후 READY 해소 → 이후 verifySignal도 해소해야 startSending 완료
     await vi.waitFor(() => expect(capturedReadySignal).not.toBeNull());
     await act(async () => {
       result.current.resolveReady({ type: 'READY', fileId });
+    });
+    await act(async () => {
+      result.current.resolveVerify({ type: 'VERIFY_OK', fileId });
     });
 
     await sendingPromise;
@@ -95,6 +99,10 @@ describe('resolveReady', () => {
     // capturedReadySignal이 [0,1] Set으로 resolve됐는지 검증
     const indices = await capturedReadySignal!;
     expect([...indices].sort((a, b) => a - b)).toEqual([0, 1]);
+
+    await act(async () => {
+      result.current.resolveVerify({ type: 'VERIFY_OK', fileId });
+    });
 
     await sendingPromise;
   });

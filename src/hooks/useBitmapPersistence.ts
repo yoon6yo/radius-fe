@@ -9,16 +9,18 @@ import {
 import { PROGRESS_UPDATE_MS } from '@/constants/transfer';
 import type { TransferRecord } from '@/types/transfer';
 
+const FLUSH_INTERVAL_MS = PROGRESS_UPDATE_MS;
+
 export function useBitmapPersistence() {
-  const flushTimerRef = useRef<number>(0);
   const pendingBitmapRef = useRef<Map<string, number[]>>(new Map());
+  const lastFlushTimeRef = useRef<number>(0);
+  const flushTimerRef = useRef<number>(0);
 
   // ── 전송 레코드 초기화 ───────────────────────────────────────
   const initTransferRecord = useCallback(
     async (record: Omit<TransferRecord, 'receivedIndices' | 'status'>): Promise<number[]> => {
       const existing = await getTransfer(record.fileId);
       if (existing && existing.status === 'pending') {
-        // 이어받기: 기존 비트맵 복원
         return existing.receivedIndices;
       }
       await saveTransfer({ ...record, receivedIndices: [], status: 'pending' });
@@ -27,19 +29,35 @@ export function useBitmapPersistence() {
     [],
   );
 
-  // ── 청크 수신 기록 (throttle하여 IndexedDB 쓰기 오버헤드 감소) ─
+  // ── 청크 수신 기록 — leading-edge throttle ───────────────────
+  // debounce만 쓰면 fast LAN에서 청크가 연속으로 오는 동안 flush가 무기한 지연됨.
+  // 대신 마지막 flush 이후 FLUSH_INTERVAL_MS가 지나면 즉시 flush하고,
+  // trailing-edge 타이머도 남겨서 마지막 청크도 반드시 기록함.
   const recordChunkReceived = useCallback((fileId: string, chunkIndex: number) => {
     const current = pendingBitmapRef.current.get(fileId) ?? [];
     current.push(chunkIndex);
     pendingBitmapRef.current.set(fileId, current);
 
-    clearTimeout(flushTimerRef.current);
-    flushTimerRef.current = window.setTimeout(() => {
+    const now = Date.now();
+    if (now - lastFlushTimeRef.current >= FLUSH_INTERVAL_MS) {
+      // 즉시 flush (leading edge)
+      clearTimeout(flushTimerRef.current);
+      lastFlushTimeRef.current = now;
       for (const [fid, indices] of pendingBitmapRef.current) {
         void updateReceivedIndices(fid, indices);
       }
       pendingBitmapRef.current.clear();
-    }, PROGRESS_UPDATE_MS);
+    } else {
+      // trailing-edge 타이머 — 마지막 청크 이후 반드시 flush
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = window.setTimeout(() => {
+        lastFlushTimeRef.current = Date.now();
+        for (const [fid, indices] of pendingBitmapRef.current) {
+          void updateReceivedIndices(fid, indices);
+        }
+        pendingBitmapRef.current.clear();
+      }, FLUSH_INTERVAL_MS);
+    }
   }, []);
 
   // ── 강제 flush (탭 닫기 전, 파일 완료 시) ────────────────────

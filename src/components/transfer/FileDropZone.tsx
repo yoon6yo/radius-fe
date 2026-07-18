@@ -35,14 +35,14 @@ export function FileDropZone({ onFiles, disabled }: FileDropZoneProps) {
       onDrop={handleDrop}
       className={[
         'flex flex-col items-center justify-center gap-2',
-        'border-2 border-dashed rounded-xl p-8 cursor-pointer transition-colors',
+        'border-2 border-dashed rounded-xl p-8 cursor-pointer transition-all',
         isDragging && !disabled
-          ? 'border-indigo-500 bg-indigo-500/10'
-          : 'border-gray-700 hover:border-gray-500',
+          ? 'border-blue-400 bg-blue-50'
+          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
         disabled ? 'opacity-40 cursor-not-allowed pointer-events-none' : '',
       ].join(' ')}
     >
-      <span className="text-3xl">📁</span>
+      <span className="text-2xl">📁</span>
       <p className="text-sm text-gray-400 text-center">
         파일을 끌어다 놓거나 클릭하여 선택
       </p>

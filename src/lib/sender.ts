@@ -17,6 +17,10 @@ export class FileSender {
     this.pc = pc;
   }
 
+  get isAborted(): boolean {
+    return this.aborted;
+  }
+
   abort() {
     this.aborted = true;
   }
@@ -26,8 +30,9 @@ export class FileSender {
     fileId: string,
     chunkHashes: string[],
     fileHash: string,
-    readySignal: Promise<Set<number>>, // READY/RESUME 수신 시 resolve
+    readySignal: Promise<Set<number>>,
     onProgress: (sent: number) => void,
+    onSendingStart?: () => void,
   ): Promise<void> {
     const totalChunks = calcTotalChunks(file.size);
     const totalHashParts = Math.ceil(chunkHashes.length / HASHES_PER_PART);
@@ -60,21 +65,25 @@ export class FileSender {
     const hashDone: HashDone = { type: 'HASH_DONE', fileId, fileHash };
     this.pc.sendText(JSON.stringify(hashDone));
 
-    // 4. 수신측 READY / RESUME 대기 후 청크 전송
-    //    abort 시에도 무한 대기가 되지 않도록 race
-    const receivedIndices = await Promise.race([
-      readySignal,
-      new Promise<null>((resolve) => {
-        const poll = setInterval(() => {
-          if (this.aborted) {
-            clearInterval(poll);
-            resolve(null);
-          }
-        }, 50);
-      }),
-    ]);
+    // 4. READY / RESUME 대기 — abort 시에도 탈출
+    // setInterval id를 외부에서 캡처해야 readySignal이 먼저 resolve될 때도 정리 가능
+    let abortPollId: ReturnType<typeof setInterval> | undefined;
+    const abortRace = new Promise<null>((resolve) => {
+      abortPollId = setInterval(() => {
+        if (this.aborted) {
+          clearInterval(abortPollId);
+          resolve(null);
+        }
+      }, 50);
+    });
+
+    const receivedIndices = await Promise.race([readySignal, abortRace]);
+    clearInterval(abortPollId);
 
     if (!receivedIndices || this.aborted) return;
+
+    // READY/RESUME 수신 직후 → UI 상태 'transferring'으로 전환
+    onSendingStart?.();
 
     const pendingIndices: number[] = [];
     for (let i = 0; i < totalChunks; i++) {
@@ -98,7 +107,6 @@ export class FileSender {
   ): Promise<void> {
     this.pc.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD;
 
-    // pending을 공유해 sendNext 재호출(백프레셔) 시에도 모든 프로미스를 추적
     const pending: Promise<void>[] = [];
 
     return new Promise((resolve) => {
@@ -106,24 +114,30 @@ export class FileSender {
 
       const sendNext = () => {
         while (cursor < indices.length && !this.aborted) {
+          // 채널이 닫혔으면 즉시 abort (silent no-op 방지)
+          if (!this.pc.isChannelOpen) {
+            this.aborted = true;
+            break;
+          }
+
           if (this.pc.bufferedAmount > BUFFER_HIGH_THRESHOLD) {
             this.pc.onBufferedAmountLow(sendNext);
             return;
           }
 
           const chunkIndex = indices[cursor++];
+          const sentSoFar = cursor; // 클로저 캡처 — then() 내에서 cursor가 더 진행돼도 정확
           const start = chunkIndex * CHUNK_SIZE;
           const slice = file.slice(start, start + CHUNK_SIZE);
 
           const p = slice.arrayBuffer().then((data) => {
             const packet = buildChunk(chunkIndex, data);
             this.pc.sendBinary(packet);
-            onProgress(cursor);
+            onProgress(sentSoFar);
           });
           pending.push(p);
         }
 
-        // 모든 arrayBuffer → sendBinary가 끝난 뒤 resolve (Bug 4)
         if (cursor >= indices.length || this.aborted) {
           void Promise.all(pending).then(() => resolve());
         }

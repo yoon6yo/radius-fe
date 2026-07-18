@@ -12,6 +12,7 @@ function createMockPc() {
   const pc = {
     sentText,
     sentBinary,
+    isChannelOpen: true,
     bufferedAmount: 0,
     bufferedAmountLowThreshold: 0,
     sendText: vi.fn((msg: string) => sentText.push(msg)),

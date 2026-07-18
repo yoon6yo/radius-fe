@@ -2,39 +2,45 @@ import { useState, useCallback } from 'react';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useResumeDetection } from '@/hooks/useResumeDetection';
 import { ResumeBanner } from '@/components/ui/ResumeBanner';
-import { TOKEN_ALPHABET } from '@/constants/transfer';
-
-const TOKEN_PATTERN = new RegExp(`^[${TOKEN_ALPHABET}]{6}$`);
+import { TOKEN_PATTERN } from '@/constants/transfer';
 
 export default function Home() {
   const { createRoom, joinRoom } = useSignaling();
   const { resumeInfo, dismiss } = useResumeDetection();
+  const [step, setStep] = useState<'select' | 'receive'>('select');
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleCreate = useCallback(async () => {
-    setIsCreating(true);
+  const handleSend = useCallback(async () => {
+    setIsLoading(true);
     await createRoom();
-    setIsCreating(false);
+    setIsLoading(false);
   }, [createRoom]);
 
   const handleJoin = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const normalized = pin.trim().toUpperCase();
+    async () => {
+      const normalized = pin.trim();
       if (!TOKEN_PATTERN.test(normalized)) {
-        setPinError('올바른 핀 번호를 입력해주세요 (영숫자 6자 이상)');
+        setPinError('숫자 6자리를 입력해주세요');
         return;
       }
       setPinError('');
+      setIsLoading(true);
       await joinRoom(normalized);
+      setIsLoading(false);
     },
     [joinRoom, pin],
   );
 
+  const handleBack = useCallback(() => {
+    setStep('select');
+    setPin('');
+    setPinError('');
+  }, []);
+
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white px-4">
+    <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
       {resumeInfo && (
         <ResumeBanner
           session={resumeInfo.session}
@@ -43,49 +49,92 @@ export default function Home() {
         />
       )}
 
-      <div className="w-full max-w-sm space-y-8">
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold tracking-tight">Radius</h1>
-          <p className="text-gray-400 text-sm">서버를 거치지 않는 P2P 파일 공유</p>
+      <div className="w-full max-w-xs">
+        {/* 로고 */}
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">rdrop</h1>
+          <p className="text-gray-400 mt-1.5 text-sm">파일을 직접, 빠르게</p>
         </div>
 
-        <button
-          onClick={() => void handleCreate()}
-          disabled={isCreating}
-          className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors"
-        >
-          {isCreating ? '룸 생성 중…' : '새 룸 만들기'}
-        </button>
+        {step === 'select' ? (
+          <div className="space-y-3">
+            {/* 보내기 */}
+            <button
+              onClick={() => void handleSend()}
+              disabled={isLoading}
+              className="w-full bg-blue-500 hover:bg-blue-600 active:bg-blue-700 disabled:bg-blue-300 text-white rounded-2xl p-5 text-left transition-all duration-150 shadow-sm"
+            >
+              <span className="text-2xl block mb-2">📤</span>
+              <span className="font-semibold text-base block">
+                {isLoading ? '룸 생성 중…' : '파일 보내기'}
+              </span>
+              <span className="text-blue-100 text-sm mt-0.5 block">
+                PIN을 공유해 상대방을 초대하세요
+              </span>
+            </button>
 
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-800" />
+            {/* 받기 */}
+            <button
+              onClick={() => setStep('receive')}
+              disabled={isLoading}
+              className="w-full bg-white hover:bg-gray-50 active:bg-gray-100 border border-gray-200 rounded-2xl p-5 text-left transition-all duration-150 shadow-sm"
+            >
+              <span className="text-2xl block mb-2">📥</span>
+              <span className="font-semibold text-base text-gray-900 block">파일 받기</span>
+              <span className="text-gray-400 text-sm mt-0.5 block">
+                상대방에게 받은 PIN을 입력하세요
+              </span>
+            </button>
           </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-gray-950 text-gray-500">또는</span>
-          </div>
-        </div>
+        ) : (
+          <div className="space-y-4">
+            <button
+              onClick={handleBack}
+              className="flex items-center gap-1 text-gray-500 text-sm hover:text-gray-700 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              뒤로
+            </button>
 
-        <form onSubmit={(e) => void handleJoin(e)} className="space-y-3">
-          <div>
-            <input
-              type="text"
-              value={pin}
-              onChange={(e) => setPin(e.target.value.toUpperCase())}
-              placeholder="핀 번호 입력 (예: AB3XK9)"
-              maxLength={20}
-              className="w-full py-3 px-4 bg-gray-900 border border-gray-700 rounded-lg text-center tracking-widest text-lg font-mono placeholder:text-gray-600 focus:outline-none focus:border-indigo-500"
-            />
-            {pinError && <p className="mt-1 text-sm text-red-400">{pinError}</p>}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900 mb-1">PIN 입력</h2>
+              <p className="text-sm text-gray-400 mb-5">
+                상대방에게 받은 6자리 숫자를 입력하세요
+              </p>
+
+              <form onSubmit={(e) => { e.preventDefault(); void handleJoin(); }} className="space-y-3">
+                <div>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="\d{6}"
+                    value={pin}
+                    onChange={(e) => {
+                      setPin(e.target.value.replace(/\D/g, '').slice(0, 6));
+                      setPinError('');
+                    }}
+                    placeholder="000 000"
+                    maxLength={6}
+                    autoFocus
+                    className="w-full py-3.5 px-4 border border-gray-200 rounded-xl text-center tracking-[0.5em] text-2xl font-mono text-gray-900 placeholder:text-gray-300 placeholder:tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                  {pinError && (
+                    <p className="mt-2 text-sm text-red-500 text-center">{pinError}</p>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  disabled={pin.length < 6 || isLoading}
+                  className="w-full py-3.5 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-white rounded-xl font-semibold text-base transition-all duration-150"
+                >
+                  {isLoading ? '연결 중…' : '연결하기'}
+                </button>
+              </form>
+            </div>
           </div>
-          <button
-            type="submit"
-            disabled={!pin.trim()}
-            className="w-full py-3 px-6 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors"
-          >
-            룸 참여
-          </button>
-        </form>
+        )}
       </div>
     </main>
   );

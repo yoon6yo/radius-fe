@@ -142,6 +142,10 @@ export class PeerConnection {
     this.channel.send(buffer);
   }
 
+  get isChannelOpen(): boolean {
+    return this.channel?.readyState === 'open';
+  }
+
   get bufferedAmount(): number {
     return this.channel?.bufferedAmount ?? 0;
   }

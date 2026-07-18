@@ -1,6 +1,6 @@
 import type { SessionRecord, TransferRecord } from '@/types/transfer';
 
-const DB_NAME = 'radius';
+const DB_NAME = 'rdrop';
 const DB_VERSION = 1;
 
 let db: IDBDatabase | null = null;

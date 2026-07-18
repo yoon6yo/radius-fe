@@ -8,32 +8,48 @@ interface UseWebRTCOptions {
   onControlMessage?: (msg: ControlMessage) => void;
   onBinaryChunk?: (buffer: ArrayBuffer) => void;
   onChannelClose?: ChannelCloseHandler;
+  onChannelOpen?: () => void;
 }
 
 const RECONNECT_INTERVAL_MS = 10_000;
 
-export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: UseWebRTCOptions = {}) {
+export function useWebRTC({
+  onControlMessage,
+  onBinaryChunk,
+  onChannelClose,
+  onChannelOpen,
+}: UseWebRTCOptions = {}) {
   const { iceServers, role } = useRoomStore();
   const pcRef = useRef<PeerConnection | null>(null);
   const [channelReady, setChannelReady] = useState(false);
   const [isRelayed, setIsRelayed] = useState(false);
   const reconnectTimerRef = useRef<number>(0);
+  const everConnectedRef = useRef(false);
 
-  const handleMessage = useCallback(
-    (event: MessageEvent) => {
-      if (typeof event.data === 'string') {
-        try {
-          const msg = JSON.parse(event.data) as ControlMessage;
-          onControlMessage?.(msg);
-        } catch {
-          console.warn('[WebRTC] JSON parse error', event.data);
-        }
-      } else {
-        onBinaryChunk?.(event.data as ArrayBuffer);
+  // refs로 콜백 최신 버전 유지 — PeerConnection은 생성 시점의 함수 참조를 고정하므로
+  // 직접 넘기면 클로저가 굳어버림. ref를 통해 항상 최신 핸들러를 호출함
+  const onControlMessageRef = useRef(onControlMessage);
+  onControlMessageRef.current = onControlMessage;
+  const onBinaryChunkRef = useRef(onBinaryChunk);
+  onBinaryChunkRef.current = onBinaryChunk;
+  const onChannelCloseRef = useRef(onChannelClose);
+  onChannelCloseRef.current = onChannelClose;
+  const onChannelOpenRef = useRef(onChannelOpen);
+  onChannelOpenRef.current = onChannelOpen;
+
+  // handleMessage는 빈 deps로 고정 → PeerConnection 생성 이후에도 최신 콜백 호출
+  const handleMessage = useCallback((event: MessageEvent) => {
+    if (typeof event.data === 'string') {
+      try {
+        const msg = JSON.parse(event.data) as ControlMessage;
+        onControlMessageRef.current?.(msg);
+      } catch {
+        console.warn('[WebRTC] JSON parse error', event.data);
       }
-    },
-    [onControlMessage, onBinaryChunk],
-  );
+    } else {
+      onBinaryChunkRef.current?.(event.data as ArrayBuffer);
+    }
+  }, []);
 
   const handleConnectionState = useCallback(
     (state: RTCPeerConnectionState) => {
@@ -50,18 +66,16 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
   );
 
   const handleChannelOpen = useCallback(() => {
+    everConnectedRef.current = true;
     setChannelReady(true);
+    onChannelOpenRef.current?.();
   }, []);
 
-  const handleChannelClose = useCallback(
-    (reason: 'closed' | 'error') => {
-      setChannelReady(false);
-      onChannelClose?.(reason);
-    },
-    [onChannelClose],
-  );
+  const handleChannelClose = useCallback((reason: 'closed' | 'error') => {
+    setChannelReady(false);
+    onChannelCloseRef.current?.(reason);
+  }, []);
 
-  // role이 확정된 시점에 PeerConnection 생성
   useEffect(() => {
     if (!role || iceServers.length === 0) return;
     if (pcRef.current) return;
@@ -75,7 +89,6 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
       onChannelClose: handleChannelClose,
     });
 
-    // offerer가 재연결했을 때 peer가 이미 방에 있으면 즉시 offer 전송 (Bug 1)
     if (role === 'offerer' && useRoomStore.getState().phase === 'peer_connected') {
       pcRef.current.triggerOffer();
     }
@@ -87,13 +100,13 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
     };
   }, [role, iceServers, handleMessage, handleConnectionState, handleChannelOpen, handleChannelClose]);
 
-  // 채널이 끊기면 10초마다 재연결 시도
+  // 한 번 연결된 적 있고 채널이 끊긴 경우에만 10초마다 재연결 시도
   useEffect(() => {
     if (channelReady) {
       clearInterval(reconnectTimerRef.current);
       return;
     }
-    if (!pcRef.current) return;
+    if (!pcRef.current || !everConnectedRef.current) return;
 
     reconnectTimerRef.current = window.setInterval(() => {
       console.log('[WebRTC] 재연결 시도 중...');
@@ -111,10 +124,7 @@ export function useWebRTC({ onControlMessage, onBinaryChunk, onChannelClose }: U
     pcRef.current?.sendBinary(buffer);
   }, []);
 
-  const getBufferedAmount = useCallback(
-    () => pcRef.current?.bufferedAmount ?? 0,
-    [],
-  );
+  const getBufferedAmount = useCallback(() => pcRef.current?.bufferedAmount ?? 0, []);
 
   const setBufferedAmountLowThreshold = useCallback((value: number) => {
     if (pcRef.current) pcRef.current.bufferedAmountLowThreshold = value;

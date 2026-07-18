@@ -29,11 +29,31 @@ export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* 수신 대기 안내 */}
+      {role === 'answerer' && !isLocked && queue.length === 0 && (
+        <div className="text-center py-6">
+          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </div>
+          <p className="text-sm font-medium text-gray-700">파일 수신 대기 중</p>
+          <p className="text-xs text-gray-400 mt-1">상대방이 파일을 보내면 자동으로 수신됩니다</p>
+        </div>
+      )}
+
       {/* 전송 진행 헤더 */}
       {isLocked && queue.length > 0 && (
-        <div className="text-sm text-gray-400 text-center">
-          {currentIndex + 1} / {queue.length} 번째 파일 전송 중
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-gray-700">
+            {role === 'offerer' ? '전송 중' : '수신 중'}
+          </p>
+          <p className="text-xs text-gray-400">
+            {Math.min(currentIndex + 1, queue.length)} / {queue.length}
+          </p>
         </div>
       )}
 
@@ -58,28 +78,20 @@ export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
         </div>
       )}
 
-      {/* 수신자 안내 */}
-      {role === 'answerer' && !isLocked && (
-        <p className="text-sm text-gray-500 text-center py-4">
-          상대방이 파일을 보내면 자동으로 수신됩니다
-        </p>
-      )}
-
       {/* 전송 시작 버튼 */}
       {canStart && (
         <button
           onClick={onStartTransfer}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-semibold transition-colors"
+          className="w-full py-3.5 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded-xl font-semibold text-sm transition-all duration-150 shadow-sm"
         >
-          전송 시작 ({queue.length}개 파일)
+          전송 시작 {queue.length > 1 ? `(${queue.length}개)` : ''}
         </button>
       )}
 
-      {/* OPFS quota 안내 */}
-      {role === 'answerer' && (
-        <p className="text-xs text-gray-600 text-center">
-          수신 파일은 브라우저 내부 저장소에 임시 저장됩니다. 브라우저 데이터를 지우면
-          수신 중인 파일이 사라질 수 있습니다.
+      {/* OPFS 안내 */}
+      {role === 'answerer' && queue.length > 0 && (
+        <p className="text-xs text-gray-300 text-center">
+          수신 파일은 브라우저 임시 저장소에 보관됩니다
         </p>
       )}
     </div>

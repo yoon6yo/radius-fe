@@ -7,27 +7,28 @@ export interface FileWriter {
 // ── OPFS 구현체 ─────────────────────────────────────────────
 
 export class OPFSFileWriter implements FileWriter {
-  private handle: FileSystemSyncAccessHandle | null = null;
+  private writable: FileSystemWritableFileStream | null = null;
 
   private constructor() {}
 
-  static async create(fileName: string): Promise<OPFSFileWriter> {
+  // isResume=false: 파일을 0바이트로 초기화 → 이전 전송 잔여 바이트 방지
+  // isResume=true: 기존 데이터 유지 → 이어받기 시 수신된 청크 보존
+  static async create(fileName: string, isResume = false): Promise<OPFSFileWriter> {
     const root = await navigator.storage.getDirectory();
-    // 같은 파일명이 이미 존재하면 덮어쓰기 (이어받기 시나리오에서는 기존 파일 유지)
     const fileHandle = await root.getFileHandle(fileName, { create: true });
     const writer = new OPFSFileWriter();
-    writer.handle = await fileHandle.createSyncAccessHandle();
+    writer.writable = await fileHandle.createWritable({ keepExistingData: isResume });
     return writer;
   }
 
   async write(chunk: ArrayBuffer, offset: number): Promise<void> {
-    this.handle!.write(chunk, { at: offset });
+    // position 지정으로 랜덤 접근 쓰기 (청크 순서 무관)
+    await this.writable!.write({ type: 'write', position: offset, data: chunk });
   }
 
   async close(): Promise<void> {
-    this.handle!.flush();
-    this.handle!.close();
-    this.handle = null;
+    await this.writable!.close();
+    this.writable = null;
   }
 }
 

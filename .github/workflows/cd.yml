@@ -1,0 +1,33 @@
+name: CD — Deploy (FE)
+
+on:
+  workflow_run:
+    workflows: ["CI — Build & Push (FE)"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy:
+    name: Deploy to k3s via SSH
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.K8S_SSH_HOST }}
+          port: ${{ secrets.K8S_SSH_PORT || 22 }}
+          username: ${{ secrets.K8S_SSH_USER }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          script: |
+            SHA=$(echo "${{ github.event.workflow_run.head_sha || github.sha }}" | cut -c1-7)
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${SHA}"
+            kubectl set image deployment/rdrop-frontend frontend=$IMAGE -n rdrop
+            kubectl rollout status deployment/rdrop-frontend -n rdrop --timeout=120s

@@ -98,18 +98,18 @@ export function useSignaling() {
 
       if (!socket.connected) socket.connect();
 
-      socket.emit('join-room', roomToken.toUpperCase(), async (result) => {
+      socket.emit('join-room', roomToken, async (result) => {
         if (!result.ok) {
           setError(result.error);
           return;
         }
         await saveSession({
-          token: roomToken.toUpperCase(),
+          token: roomToken,
           role: result.role,
           expiresAt: result.expiresAt,
         });
-        setRoom(roomToken.toUpperCase(), result.role, result.expiresAt);
-        void navigate(`/r/${roomToken.toUpperCase()}`);
+        setRoom(roomToken, result.role, result.expiresAt);
+        void navigate(`/r/${roomToken}`);
       });
     },
     [navigate, setError, setIceServers, setPhase, setRoom],
@@ -119,7 +119,11 @@ export function useSignaling() {
   const rejoinByToken = useCallback(
     async (roomToken: string) => {
       const session = await getActiveSession();
-      if (!session || session.token !== roomToken) return;
+      if (!session || session.token !== roomToken) {
+        // 세션이 없거나 만료된 경우 홈으로 이동
+        void navigate('/');
+        return;
+      }
 
       try {
         const servers = await fetchIceServers();
@@ -133,7 +137,7 @@ export function useSignaling() {
       socket.emit('rejoin', { token: roomToken, role: session.role }, (result) => {
         if (!result.ok) {
           void deleteSession(roomToken);
-          setError(result.error);
+          void navigate('/');
           return;
         }
         setRoom(roomToken, result.role, result.expiresAt);
@@ -141,7 +145,7 @@ export function useSignaling() {
         if (result.peerConnected) setPhase('peer_connected');
       });
     },
-    [setError, setIceServers, setPhase, setRoom],
+    [navigate, setIceServers, setPhase, setRoom],
   );
 
   return { createRoom, joinRoom, rejoinByToken, token, role };
