@@ -1,0 +1,14 @@
+# rdrop
+
+rdrop은 브라우저 기반 P2P 파일 전송 서비스입니다. 설치 없이 6자리 PIN을 통해 두 브라우저 간 WebRTC DataChannel로 직접 파일을 전송합니다. 서버를 거치지 않아 빠르고 프라이빗합니다.
+
+## 주요 기능
+
+- PIN 기반 P2P 파일 전송 (WebRTC DataChannel)
+- HTTPS 필수 (WebCrypto / OPFS 보안 컨텍스트)
+- 전송 중단 시 이어받기 지원 (IndexedDB 세션 유지)
+- TURN 서버를 통한 NAT 우회 지원
+
+## 링크
+
+- [홈](https://rdrop.duckdns.org/) — 파일 보내기 / 받기

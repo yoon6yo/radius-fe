@@ -53,7 +53,7 @@ export default function Home() {
         {/* 로고 */}
         <div className="text-center mb-10">
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">rdrop</h1>
-          <p className="text-gray-400 mt-1.5 text-sm">파일을 직접, 빠르게</p>
+          <p className="text-gray-600 mt-1.5 text-sm">파일을 직접, 빠르게</p>
         </div>
 
         {step === 'select' ? (
@@ -62,13 +62,13 @@ export default function Home() {
             <button
               onClick={() => void handleSend()}
               disabled={isLoading}
-              className="w-full bg-blue-500 hover:bg-blue-600 active:bg-blue-700 disabled:bg-blue-300 text-white rounded-2xl p-5 text-left transition-all duration-150 shadow-sm"
+              className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-300 text-white rounded-2xl p-5 text-left transition-all duration-150 shadow-sm"
             >
               <span className="text-2xl block mb-2">📤</span>
               <span className="font-semibold text-base block">
                 {isLoading ? '룸 생성 중…' : '파일 보내기'}
               </span>
-              <span className="text-blue-100 text-sm mt-0.5 block">
+              <span className="text-white/80 text-sm mt-0.5 block">
                 PIN을 공유해 상대방을 초대하세요
               </span>
             </button>
@@ -81,7 +81,7 @@ export default function Home() {
             >
               <span className="text-2xl block mb-2">📥</span>
               <span className="font-semibold text-base text-gray-900 block">파일 받기</span>
-              <span className="text-gray-400 text-sm mt-0.5 block">
+              <span className="text-gray-600 text-sm mt-0.5 block">
                 상대방에게 받은 PIN을 입력하세요
               </span>
             </button>
@@ -100,7 +100,7 @@ export default function Home() {
 
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
               <h2 className="text-lg font-bold text-gray-900 mb-1">PIN 입력</h2>
-              <p className="text-sm text-gray-400 mb-5">
+              <p className="text-sm text-gray-600 mb-5">
                 상대방에게 받은 6자리 숫자를 입력하세요
               </p>
 
