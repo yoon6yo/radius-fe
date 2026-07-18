@@ -26,6 +26,7 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
 
   const resolveReady = useCallback((msg: ReadyMsg | ResumeMsg) => {
     const resolver = readyResolversRef.current.get(msg.fileId);
+    console.log('[Sender] resolveReady:', msg.type, msg.fileId, 'resolver found:', !!resolver);
     if (!resolver) return;
     readyResolversRef.current.delete(msg.fileId);
     const indices =
@@ -50,8 +51,10 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
 
       // 스냅샷 대신 store에서 직접 읽어 클로저 스태일 방지
       const { queue: liveQueue, currentIndex: liveIndex } = useTransferStore.getState();
+      console.log('[Sender] startSending from index', liveIndex, 'queue length:', liveQueue.length);
       for (let i = liveIndex; i < liveQueue.length; i++) {
         const item: QueuedFile = liveQueue[i];
+        console.log('[Sender] processing file:', item.fileId, item.file.name);
         updateFileStatus(item.fileId, 'waiting_ready');
 
         // 루프 도중 파일이 제거됐을 가능성 대비 — store에서 다시 확인
@@ -65,6 +68,7 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
         senderRef.current = sender;
 
         const readySignal = new Promise<Set<number>>((resolve) => {
+          console.log('[Sender] resolver set for:', item.fileId);
           readyResolversRef.current.set(item.fileId, resolve);
         });
 

@@ -53,6 +53,7 @@ export function useFileReceiver({
   const handleControl = useCallback(
     async (msg: ControlMessage) => {
       if (msg.type === 'FILE_META') {
+        console.log('[Receiver] FILE_META:', msg.fileId, msg.fileName);
         chunkHashesRef.current = [];
         fileHashRef.current = '';
         metaRef.current = msg;
@@ -83,6 +84,11 @@ export function useFileReceiver({
         fileHashRef.current = msg.fileHash;
 
         const received = [...receivedBitmap.current];
+        console.log(
+          '[Receiver] HASH_DONE:', msg.fileId,
+          '→ sending', received.length > 0 ? 'RESUME' : 'READY',
+          'chunkHashes:', chunkHashesRef.current.length,
+        );
         if (received.length > 0) {
           sendControl({ type: 'RESUME', fileId: msg.fileId, receivedIndices: received });
         } else {

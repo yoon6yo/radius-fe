@@ -8,7 +8,10 @@ type HashReadyCallback = (
   fileHash: string,
 ) => void;
 
-export function useSenderHash(onHashReady: HashReadyCallback) {
+export function useSenderHash(
+  onHashReady: HashReadyCallback,
+  onHashError?: (fileId: string) => void,
+) {
   const chunkHashesRef = useRef<Map<string, string[]>>(new Map());
   const fileHashRef = useRef<Map<string, string>>(new Map());
   const pendingCountRef = useRef<Map<string, number>>(new Map());
@@ -46,6 +49,12 @@ export function useSenderHash(onHashReady: HashReadyCallback) {
       fileHashRef.current.set(fileId, hash);
       checkComplete(fileId);
     },
+    onError: onHashError
+      ? (fileId, message) => {
+          console.error('[SenderHash] worker error for', fileId, ':', message);
+          onHashError(fileId);
+        }
+      : undefined,
   });
 
   const computeHashes = useCallback(

@@ -3,11 +3,19 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
+const signalingTarget = process.env.VITE_SIGNALING_URL ?? 'http://localhost:3000';
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    proxy: {
+      '/socket.io': { target: signalingTarget, ws: true, changeOrigin: true },
+      '/ice-config': { target: signalingTarget, changeOrigin: true },
     },
   },
   worker: {

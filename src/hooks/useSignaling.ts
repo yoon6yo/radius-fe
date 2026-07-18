@@ -43,7 +43,7 @@ export function useSignaling() {
       const servers = await fetchIceServers();
       setIceServers(servers);
     } catch {
-      // 개발 환경 fallback
+      setIceServers([{ urls: 'stun:stun.l.google.com:19302' }]);
     }
 
     if (!socket.connected) socket.connect();
@@ -68,7 +68,7 @@ export function useSignaling() {
         const servers = await fetchIceServers();
         setIceServers(servers);
       } catch {
-        // 개발 환경 fallback
+        setIceServers([{ urls: 'stun:stun.l.google.com:19302' }]);
       }
 
       if (!socket.connected) socket.connect();
@@ -104,7 +104,7 @@ export function useSignaling() {
         const servers = await fetchIceServers();
         setIceServers(servers);
       } catch {
-        // 개발 환경 fallback
+        setIceServers([{ urls: 'stun:stun.l.google.com:19302' }]);
       }
 
       if (!socket.connected) socket.connect();

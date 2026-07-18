@@ -11,6 +11,7 @@ interface UseHashWorkerOptions {
   onChunksDone?: ChunksDoneCallback;
   onFileHash?: FileHashCallback;
   onBufferHash?: BufferHashCallback;
+  onError?: (fileId: string, message: string) => void;
 }
 
 export function useHashWorker(options: UseHashWorkerOptions = {}) {
@@ -38,6 +39,7 @@ export function useHashWorker(options: UseHashWorkerOptions = {}) {
         onBufferHash?.(msg.fileId, msg.chunkIndex, msg.hash);
       } else if (msg.type === 'ERROR') {
         console.error('[HashWorker] error:', msg.fileId, msg.message);
+        optionsRef.current.onError?.(msg.fileId, msg.message);
       }
     };
 

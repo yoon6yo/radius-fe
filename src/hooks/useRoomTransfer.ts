@@ -54,14 +54,23 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   const hashReadyCountRef = useRef(0);
   const expectedHashCountRef = useRef(0);
 
-  const { computeHashes } = useSenderHash((fileId, chunkHashes, fileHash) => {
-    chunkHashesByFileId.current.set(fileId, chunkHashes);
-    fileHashByFileId.current.set(fileId, fileHash);
-    hashReadyCountRef.current++;
-    if (hashReadyCountRef.current >= expectedHashCountRef.current) {
-      void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
-    }
-  });
+  const { computeHashes } = useSenderHash(
+    (fileId, chunkHashes, fileHash) => {
+      console.log('[Transfer] hash ready:', fileId, 'chunks:', chunkHashes.length,
+        '(', hashReadyCountRef.current + 1, '/', expectedHashCountRef.current, ')');
+      chunkHashesByFileId.current.set(fileId, chunkHashes);
+      fileHashByFileId.current.set(fileId, fileHash);
+      hashReadyCountRef.current++;
+      if (hashReadyCountRef.current >= expectedHashCountRef.current) {
+        console.log('[Transfer] all hashes ready → startSending');
+        void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
+      }
+    },
+    (fileId) => {
+      console.error('[Transfer] hash worker error for:', fileId);
+      updateFileStatus(fileId, 'error');
+    },
+  );
 
   // 큐가 잠기면(전송 시작) 해시 계산 시작 + 상태 'hashing'으로 표시
   useEffect(() => {
@@ -96,27 +105,34 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     (msg: ControlMessage) => {
       if (role === 'answerer') {
         void (async () => {
-          if (msg.type === 'FILE_META') {
-            await initTransferRecord({
-              fileId: msg.fileId,
-              token: token ?? '',
-              fileName: msg.fileName,
-              fileSize: msg.fileSize,
-              chunkSize: msg.chunkSize,
-              totalChunks: msg.totalChunks,
-              fileHash: '',
-              chunkHashes: [],
-            });
+          try {
+            if (msg.type === 'FILE_META') {
+              console.log('[Transfer:answerer] FILE_META received:', msg.fileId);
+              await initTransferRecord({
+                fileId: msg.fileId,
+                token: token ?? '',
+                fileName: msg.fileName,
+                fileSize: msg.fileSize,
+                chunkSize: msg.chunkSize,
+                totalChunks: msg.totalChunks,
+                fileHash: '',
+                chunkHashes: [],
+              });
+            }
+            // HASH_DONE: 해시 먼저 등록 → READY/RESUME 전송
+            // (순서가 반대면 READY 후 도착한 초반 청크가 검증 없이 통과됨)
+            if (msg.type === 'HASH_DONE') {
+              console.log('[Transfer:answerer] HASH_DONE received:', msg.fileId, 'hashes:', getChunkHashes().length);
+              setChunkHashes(msg.fileId, getChunkHashes());
+            }
+            await handleControl(msg);
+          } catch (err) {
+            console.error('[Transfer:answerer] onControlMessage error for', msg.type, ':', err);
           }
-          // HASH_DONE: 해시 먼저 등록 → READY/RESUME 전송
-          // (순서가 반대면 READY 후 도착한 초반 청크가 검증 없이 통과됨)
-          if (msg.type === 'HASH_DONE') {
-            setChunkHashes(msg.fileId, getChunkHashes());
-          }
-          await handleControl(msg);
         })();
       } else {
         if (msg.type === 'READY' || msg.type === 'RESUME') {
+          console.log('[Transfer:offerer] received', msg.type, 'for:', (msg as ReadyMsg | ResumeMsg).fileId);
           resolveReady(msg as ReadyMsg | ResumeMsg);
         }
         if (msg.type === 'VERIFY_OK' || msg.type === 'VERIFY_FAIL') {
