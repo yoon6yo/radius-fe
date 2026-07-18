@@ -70,7 +70,7 @@ export function useFileReceiver({
           exportError: null,
         });
 
-        writerRef.current = await OPFSFileWriter.create(msg.fileName);
+        writerRef.current = await OPFSFileWriter.create(msg.fileName, restored.length > 0);
         return;
       }
 
@@ -127,15 +127,16 @@ export function useFileReceiver({
 
   // ── 전송 완료 처리 ──────────────────────────────────────────
   const handleTransferDone = async (msg: TransferDone) => {
-    await writerRef.current?.close();
-    writerRef.current = null;
-
     const meta = metaRef.current;
-    if (!meta) return;
+    if (!meta || meta.fileId !== msg.fileId) return;
 
     setState((s) => ({ ...s, exportPhase: 'exporting' }));
 
     try {
+      // close()를 try 안에서 실행 — OPFS 오류 시 VERIFY_FAIL 전송 가능
+      await writerRef.current?.close();
+      writerRef.current = null;
+
       const fileValid = await verifyFileHash(
         msg.fileId,
         meta.fileName,
@@ -143,16 +144,7 @@ export function useFileReceiver({
       );
 
       if (!fileValid) {
-        console.error('[Receiver] 전체 파일 해시 불일치 — 클라이언트 로직 버그 의심', {
-          fileId: msg.fileId,
-          fileName: meta.fileName,
-          expectedHash: fileHashRef.current,
-        });
-        sendControl({
-          type: 'VERIFY_FAIL',
-          fileId: msg.fileId,
-          reason: 'file_hash_mismatch',
-        });
+        sendControl({ type: 'VERIFY_FAIL', fileId: msg.fileId, reason: 'file_hash_mismatch' });
         setState((s) => ({
           ...s,
           exportPhase: 'error',
@@ -164,14 +156,15 @@ export function useFileReceiver({
 
       await exportFromOPFS(meta.fileName);
       await onTransferComplete?.(msg.fileId);
-
       sendControl({ type: 'VERIFY_OK', fileId: msg.fileId });
       setState((s) => ({ ...s, exportPhase: 'done' }));
-
       await deleteFromOPFS(meta.fileName);
     } catch (err) {
+      // OPFS 오류, 내보내기 실패, onTransferComplete 예외 — 모두 sender에게 알림
+      sendControl({ type: 'VERIFY_FAIL', fileId: msg.fileId, reason: 'file_hash_mismatch' });
       const errorMsg = err instanceof Error ? err.message : String(err);
       setState((s) => ({ ...s, exportPhase: 'error', exportError: errorMsg }));
+      writerRef.current = null;
     }
   };
 
