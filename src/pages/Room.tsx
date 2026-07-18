@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useRoomTransfer } from '@/hooks/useRoomTransfer';
@@ -14,13 +14,18 @@ const PHASE_LABEL: Record<string, string> = {
   waiting_peer: '상대방 대기 중',
   peer_connected: '연결됨',
   peer_disconnected: '연결 끊김',
+  peer_left: '상대방이 나갔습니다',
   error: '오류',
 };
 
 export default function Room() {
   const { token: urlToken } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const { rejoinByToken } = useSignaling();
+  const { rejoinByToken, leaveRoom } = useSignaling();
+  const [pinCopied, setPinCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const pinCopyTimerRef = useRef<number>(0);
+  const linkCopyTimerRef = useRef<number>(0);
   const { token, role, phase, expiresAt, errorMessage } = useRoomStore();
   const { isLocked } = useTransferStore();
   const [channelDropped, setChannelDropped] = useState(false);
@@ -35,8 +40,30 @@ export default function Room() {
     [isLocked],
   );
 
-  const { channelReady, isRelayed } = useRoomTransfer({ onChannelClose: handleChannelClose });
+  const { channelReady, isRelayed, abortCurrent } = useRoomTransfer({ onChannelClose: handleChannelClose });
   const { lockQueue } = useTransferStore();
+
+  const handleLeaveRoom = useCallback(async () => {
+    abortCurrent();
+    await leaveRoom();
+  }, [abortCurrent, leaveRoom]);
+
+  const handleCopyPin = useCallback(() => {
+    const pin = urlToken ?? token ?? '';
+    void navigator.clipboard.writeText(pin).then(() => {
+      setPinCopied(true);
+      clearTimeout(pinCopyTimerRef.current);
+      pinCopyTimerRef.current = window.setTimeout(() => setPinCopied(false), 2000);
+    });
+  }, [urlToken, token]);
+
+  const handleCopyLink = useCallback(() => {
+    void navigator.clipboard.writeText(window.location.href).then(() => {
+      setLinkCopied(true);
+      clearTimeout(linkCopyTimerRef.current);
+      linkCopyTimerRef.current = window.setTimeout(() => setLinkCopied(false), 2000);
+    });
+  }, []);
 
   useBeforeUnload();
 
@@ -50,9 +77,36 @@ export default function Room() {
 
   const handleStartTransfer = useCallback(() => lockQueue(), [lockQueue]);
 
+  // 세션 확인 중 — rejoinByToken이 유효하지 않으면 navigate('/') 처리
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-400 text-sm">확인 중…</p>
+      </div>
+    );
+  }
+
+  // 상대방이 방을 나간 경우
+  if (phase === 'peer_left') {
+    return (
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl p-8 shadow-sm border border-gray-100 text-center space-y-5 w-full max-w-sm">
+          <p className="text-gray-900 font-medium text-base">상대방이 방을 나갔습니다</p>
+          <p className="text-gray-400 text-sm">세션이 종료되었습니다</p>
+          <button
+            onClick={() => void navigate('/')}
+            className="w-full py-2.5 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-700 transition-colors"
+          >
+            홈으로
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   const remainingMs = expiresAt ? expiresAt - Date.now() : ROOM_TTL_MS;
   const remainingMin = Math.max(0, Math.floor(remainingMs / 60_000));
-  const displayToken = urlToken ?? token ?? '------';
+  const displayToken = urlToken ?? token;
 
   const isConnected = channelReady;
   const isWaiting = !channelReady && phase === 'waiting_peer';
@@ -83,17 +137,19 @@ export default function Room() {
           </p>
           <div className="flex items-center justify-center gap-3 pt-1">
             <button
-              onClick={() => void navigator.clipboard.writeText(displayToken)}
-              className="text-xs text-blue-500 hover:text-blue-600 font-medium transition-colors"
+              onClick={handleCopyPin}
+              className="text-xs font-medium transition-colors"
+              style={{ color: pinCopied ? '#22c55e' : '#3b82f6' }}
             >
-              PIN 복사
+              {pinCopied ? '복사됨!' : 'PIN 복사'}
             </button>
             <span className="text-gray-200">|</span>
             <button
-              onClick={() => void navigator.clipboard.writeText(window.location.href)}
-              className="text-xs text-blue-500 hover:text-blue-600 font-medium transition-colors"
+              onClick={handleCopyLink}
+              className="text-xs font-medium transition-colors"
+              style={{ color: linkCopied ? '#22c55e' : '#3b82f6' }}
             >
-              링크 복사
+              {linkCopied ? '복사됨!' : '링크 복사'}
             </button>
           </div>
         </div>
@@ -138,10 +194,10 @@ export default function Room() {
             </div>
           )}
 
-          {/* 상대방 재연결 대기 */}
+          {/* 상대방 네트워크 끊김 — 재연결 대기 */}
           {isDisconnected && (
             <div className="mt-3 pt-3 border-t border-gray-100">
-              <p className="text-sm font-medium text-amber-600">상대방이 끊겼습니다</p>
+              <p className="text-sm font-medium text-amber-600">상대방 연결이 끊겼습니다</p>
               <p className="text-xs text-gray-400 mt-0.5">
                 {remainingMin}분 안에 돌아오면 이어받을 수 있습니다
               </p>
@@ -151,6 +207,16 @@ export default function Room() {
           {phase === 'error' && errorMessage && (
             <p className="mt-3 text-sm text-red-500">{errorMessage}</p>
           )}
+
+          {/* 방 나가기 버튼 */}
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <button
+              onClick={() => void handleLeaveRoom()}
+              className="w-full py-2 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors"
+            >
+              방 나가기
+            </button>
+          </div>
         </div>
 
         {/* 전송 패널 */}

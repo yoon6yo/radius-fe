@@ -13,53 +13,28 @@ export function useSignaling() {
   useEffect(() => {
     const onPeerJoined = () => setPhase('peer_connected');
     const onPeerReconnected = () => setPhase('peer_connected');
-    const onPeerDisconnected = () => setPhase('peer_disconnected');
+    const onPeerDisconnected = () => {
+      // peer_left 상태일 때는 덮어쓰지 않음 (의도적 나가기 vs 네트워크 끊김 구분)
+      if (useRoomStore.getState().phase !== 'peer_left') setPhase('peer_disconnected');
+    };
+    const onPeerLeft = async () => {
+      const currentToken = useRoomStore.getState().token;
+      if (currentToken) await deleteSession(currentToken);
+      setPhase('peer_left');
+    };
 
     socket.on('peer-joined', onPeerJoined);
     socket.on('peer-reconnected', onPeerReconnected);
     socket.on('peer-disconnected', onPeerDisconnected);
+    socket.on('peer-left', onPeerLeft);
 
     return () => {
       socket.off('peer-joined', onPeerJoined);
       socket.off('peer-reconnected', onPeerReconnected);
       socket.off('peer-disconnected', onPeerDisconnected);
+      socket.off('peer-left', onPeerLeft);
     };
   }, [setPhase]);
-
-  // ── 페이지 로드 시 미완료 세션 확인 ─────────────────────────
-  useEffect(() => {
-    void (async () => {
-      // /r/ 경로에서는 Room.tsx의 rejoinByToken이 처리하므로 중복 실행 방지 (Bug 2)
-      if (window.location.pathname.startsWith('/r/')) return;
-
-      const session = await getActiveSession();
-      if (!session) return;
-
-      try {
-        const servers = await fetchIceServers();
-        setIceServers(servers);
-        socket.connect();
-
-        socket.emit('rejoin', { token: session.token, role: session.role }, (result) => {
-          if (!result.ok) {
-            void deleteSession(session.token);
-            socket.disconnect();
-            return;
-          }
-          setRoom(session.token, result.role, result.expiresAt);
-          void saveSession({ ...session, role: result.role, expiresAt: result.expiresAt });
-          if (result.peerConnected) {
-            setPhase('peer_connected');
-          }
-          void navigate(`/r/${session.token}`);
-        });
-      } catch {
-        // ICE fetch 실패 시 조용히 무시 (서버 미실행 개발 환경)
-      }
-    })();
-    // 마운트 시 1회만 실행
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ── 룸 생성 ─────────────────────────────────────────────────
   const createRoom = useCallback(async () => {
@@ -148,5 +123,16 @@ export function useSignaling() {
     [navigate, setIceServers, setPhase, setRoom],
   );
 
-  return { createRoom, joinRoom, rejoinByToken, token, role };
+  const leaveRoom = useCallback(async () => {
+    const currentToken = useRoomStore.getState().token;
+    if (currentToken) {
+      socket.emit('leave-room');
+      await deleteSession(currentToken);
+    }
+    socket.disconnect();
+    useRoomStore.getState().reset();
+    void navigate('/');
+  }, [navigate]);
+
+  return { createRoom, joinRoom, rejoinByToken, leaveRoom, token, role };
 }

@@ -7,6 +7,7 @@ export type RoomPhase =
   | 'waiting_peer'
   | 'peer_connected'
   | 'peer_disconnected'
+  | 'peer_left'
   | 'error';
 
 interface RoomState {
