@@ -1,12 +1,13 @@
-// Web Worker — 메인 스레드 블로킹 없이 SHA-256 해시 계산
-import { Sha256Stream } from '@/lib/sha256Stream';
+// Web Worker — 메인 스레드 블로킹 없이 해시 계산
+import { Fnv1aStream } from '@/lib/fnv1a';
 
 const FILE_READ_CHUNK_SIZE = 65536; // HASH_FILE 스트리밍 시 사용하는 읽기 단위 (전체를 메모리에 올리지 않기 위함)
 
-// 순수 JS 스트리밍 SHA-256은 네이티브 WebCrypto보다 약 5배 느리다(132MB 기준 벤치마크:
-// 순수 JS ~820ms vs 네이티브 ~160ms). 파일이 이 크기 이하면 메모리에 전부 올려도 실질적
-// 위험이 적으므로 빠른 네이티브 경로를 쓰고, 이 크기를 넘는 파일만 느리지만 메모리 안전한
-// 스트리밍 경로를 쓴다 — 대부분의 전송에서 전송 시작/완료 전 해싱 지연을 되돌린다.
+// 청크별 무결성 검증(sha256Hex, native WebCrypto)이 실제 보안 경계를 담당하므로,
+// 전체 파일 체크는 OPFS 쓰기 경로 버그 등을 잡아내는 보조 역할이면 충분하다.
+// 파일이 이 크기 이하면 메모리에 전부 올려도 실질적 위험이 적으므로 네이티브 SHA-256을
+// 그대로 쓰고, 이 크기를 넘는 파일만 훨씬 빠르고 O(1) 메모리인 FNV-1a 스트리밍 체크섬을
+// 쓴다 (132MB 기준 벤치마크: 순수 JS SHA-256 스트리밍 823ms → FNV-1a 132ms, 네이티브보다도 빠름).
 const LARGE_FILE_STREAM_THRESHOLD = 256 * 1024 * 1024; // 256MB
 
 export type HashWorkerRequest =
@@ -28,9 +29,9 @@ async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
     .join('');
 }
 
-// 파일을 청크 단위로 순회하며 Sha256Stream에 누적 — 전체를 한 번에 메모리에 올리지 않는다.
+// 파일을 청크 단위로 순회하며 Fnv1aStream에 누적 — 전체를 한 번에 메모리에 올리지 않는다.
 async function streamFileHash(file: File): Promise<string> {
-  const stream = new Sha256Stream();
+  const stream = new Fnv1aStream();
   for (let offset = 0; offset < file.size; offset += FILE_READ_CHUNK_SIZE) {
     const slice = file.slice(offset, offset + FILE_READ_CHUNK_SIZE);
     const buf = await slice.arrayBuffer();
@@ -39,7 +40,7 @@ async function streamFileHash(file: File): Promise<string> {
   return stream.digestHex();
 }
 
-// 파일 크기에 따라 빠른 네이티브 경로 / 느리지만 메모리 안전한 스트리밍 경로를 선택한다.
+// 파일 크기에 따라 네이티브 SHA-256(작은 파일) / FNV-1a 스트리밍(큰 파일)을 선택한다.
 async function computeFileHash(file: File): Promise<string> {
   if (file.size <= LARGE_FILE_STREAM_THRESHOLD) {
     return sha256Hex(await file.arrayBuffer());
@@ -55,11 +56,10 @@ self.onmessage = async (event: MessageEvent<HashWorkerRequest>) => {
       const { fileId, file, chunkSize } = msg;
       const totalChunks = Math.ceil(file.size / chunkSize);
       const hashes: string[] = [];
-      // 큰 파일만 청크 해시와 같은 read pass 안에서 전체 파일 해시를 스트리밍으로 누적
-      // (느리지만 메모리 안전). 그 이하 크기는 순수 JS 누적 비용을 아예 들이지 않고
-      // 아래에서 네이티브로 한 번에 계산 — 대부분의 파일에서 이 루프가 더 빠르다.
+      // 큰 파일만 청크 해시와 같은 read pass 안에서 전체 파일 체크섬을 FNV-1a로 누적
+      // (메모리 안전, 빠름). 그 이하 크기는 아래에서 네이티브 SHA-256을 한 번에 계산한다.
       const needsStreaming = file.size > LARGE_FILE_STREAM_THRESHOLD;
-      const fileHasher = needsStreaming ? new Sha256Stream() : null;
+      const fileHasher = needsStreaming ? new Fnv1aStream() : null;
 
       for (let i = 0; i < totalChunks; i++) {
         const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
