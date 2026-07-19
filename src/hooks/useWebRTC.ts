@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useCallback, useState } from 'react';
+import { useLayoutEffect, useEffect, useRef, useCallback, useState } from 'react';
 import { PeerConnection } from '@/lib/webrtc';
 import { useRoomStore } from '@/store/roomStore';
 import type { ChannelCloseHandler } from '@/lib/webrtc';
