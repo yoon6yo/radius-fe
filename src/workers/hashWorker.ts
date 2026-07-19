@@ -1,7 +1,11 @@
 // Web Worker — 메인 스레드 블로킹 없이 해시 계산
 import { Fnv1aStream } from '@/lib/fnv1a';
 
-const FILE_READ_CHUNK_SIZE = 65536; // HASH_FILE 스트리밍 시 사용하는 읽기 단위 (전체를 메모리에 올리지 않기 위함)
+// HASH_FILE(수신 측 최종 재검증) 스트리밍 시 사용하는 읽기 단위 — 전송 프로토콜의
+// CHUNK_SIZE(64KB)와는 별개. 전송 완료 후 큰 파일(GB급)을 통째로 재검증할 때 64KB씩
+// 읽으면 비동기 read 호출이 수만~수십만 번 필요해 그 자체가 눈에 띄는 지연이 된다.
+// 여기서는 실시간 진행 표시가 필요 없으므로 훨씬 큰 단위로 읽어 호출 횟수를 줄인다.
+const FILE_READ_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
 
 // 청크별 무결성 검증(sha256Hex, native WebCrypto)이 실제 보안 경계를 담당하므로,
 // 전체 파일 체크는 OPFS 쓰기 경로 버그 등을 잡아내는 보조 역할이면 충분하다.
@@ -16,7 +20,6 @@ export type HashWorkerRequest =
   | { type: 'HASH_FILE'; fileId: string; file: File };
 
 export type HashWorkerResponse =
-  | { type: 'CHUNK_HASH'; fileId: string; chunkIndex: number; hash: string }
   | { type: 'CHUNKS_DONE'; fileId: string; hashes: string[]; fileHash: string }
   | { type: 'FILE_HASH'; fileId: string; hash: string }
   | { type: 'BUFFER_HASH'; fileId: string; chunkIndex: number; hash: string }
@@ -61,20 +64,15 @@ self.onmessage = async (event: MessageEvent<HashWorkerRequest>) => {
       const needsStreaming = file.size > LARGE_FILE_STREAM_THRESHOLD;
       const fileHasher = needsStreaming ? new Fnv1aStream() : null;
 
+      // 청크별 진행 메시지를 매번 postMessage로 쏘지 않는다 — 아무도 구독하지 않는데
+      // 대용량 파일(수십만 청크)에서는 이 IPC 왕복 자체가 해싱 전체 시간에 누적돼
+      // 체감될 정도로 느려짐. 최종 결과(CHUNKS_DONE)만 한 번 보낸다.
       for (let i = 0; i < totalChunks; i++) {
         const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
         const buf = await slice.arrayBuffer();
         fileHasher?.update(new Uint8Array(buf));
         const hash = await sha256Hex(buf);
         hashes.push(hash);
-
-        const response: HashWorkerResponse = {
-          type: 'CHUNK_HASH',
-          fileId,
-          chunkIndex: i,
-          hash,
-        };
-        self.postMessage(response);
       }
 
       const fileHash = fileHasher ? fileHasher.digestHex() : await computeFileHash(file);

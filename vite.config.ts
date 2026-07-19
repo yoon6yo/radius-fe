@@ -22,19 +22,10 @@ export default defineConfig({
     format: 'es',
   },
   build: {
-    // 프로덕션 빌드에서 console.*/debugger를 제거한다. PIN/토큰, 파일명,
-    // ICE candidate(로컬 IP 등) 같은 값이 콘솔 로그로 남아있으면 화면 공유·확장
-    // 프로그램·지원 로그 등을 통해 노출될 수 있음.
-    // (esbuild.drop을 쓰지 않은 이유: 이 프로젝트는 rolldown 기반 Vite라
-    // esbuild 패키지가 devDependency로 없어 관련 타입이 깨져 있음 — terser는
-    // 별도로 설치해 타입/런타임 모두 안정적으로 검증 가능해서 이쪽을 사용)
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      },
-    },
+    // 프로덕션 콘솔 로그 제거는 되돌림 — 실사용 디버깅을 콘솔 로그에 크게 의존하고
+    // 있어서(사용자가 프로덕션 콘솔 출력을 직접 붙여넣어 버그를 재현/진단하는 흐름)
+    // 로그를 지우면 그 워크플로 자체가 막힘. 필요하면 토큰처럼 민감한 값만
+    // 개별적으로 마스킹하는 방향으로 다시 논의.
     rollupOptions: {
       output: {
         manualChunks(id: string) {

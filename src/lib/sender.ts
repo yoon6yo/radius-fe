@@ -99,9 +99,13 @@ export class FileSender {
     }
   }
 
-  // bufferedAmount는 send() 호출 "이후"에만 갱신되므로, 다음 청크를 읽기 전이 아니라
-  // 방금 보낸 청크의 send() 직후에 체크해야 실제 백프레셔로 작동한다.
-  // (읽기+전송을 순차 처리해 send()를 실제로 호출한 뒤 버퍼를 확인하도록 함)
+  // 디스크 읽기를 이 개수만큼 미리 앞서 진행해 send()/backpressure 대기와 겹친다.
+  // 읽기는 네트워크와 무관한 로컬 I/O라 미리 해도 안전하고, 완전 직렬(읽기→전송을
+  // 한 번에 하나씩만)로 처리하면 청크당 읽기 지연이 그대로 전송 속도를 깎아먹는다.
+  private static readonly READ_PIPELINE_DEPTH = 8;
+
+  // bufferedAmount는 send() 호출 "이후"에만 갱신되므로, 백프레셔 체크는 반드시
+  // 실제 sendBinary() 직후에 해야 한다 — 이 부분은 읽기를 미리 하더라도 그대로 유지.
   private async sendChunks(
     file: File,
     _fileId: string,
@@ -109,6 +113,22 @@ export class FileSender {
     onProgress: (sent: number) => void,
   ): Promise<void> {
     this.pc.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD;
+
+    const readAt = (cursor: number): Promise<ArrayBuffer> => {
+      const chunkIndex = indices[cursor];
+      const start = chunkIndex * CHUNK_SIZE;
+      return file.slice(start, start + CHUNK_SIZE).arrayBuffer();
+    };
+
+    const pipeline: Promise<ArrayBuffer>[] = [];
+    let readCursor = 0;
+    const fillPipeline = () => {
+      while (readCursor < indices.length && pipeline.length < FileSender.READ_PIPELINE_DEPTH) {
+        pipeline.push(readAt(readCursor));
+        readCursor++;
+      }
+    };
+    fillPipeline();
 
     for (let cursor = 0; cursor < indices.length; cursor++) {
       if (this.aborted) return;
@@ -120,9 +140,8 @@ export class FileSender {
       }
 
       const chunkIndex = indices[cursor];
-      const start = chunkIndex * CHUNK_SIZE;
-      const slice = file.slice(start, start + CHUNK_SIZE);
-      const data = await slice.arrayBuffer();
+      const data = await pipeline.shift()!;
+      fillPipeline();
 
       const packet = buildChunk(chunkIndex, data);
       this.pc.sendBinary(packet);

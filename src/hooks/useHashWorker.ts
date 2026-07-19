@@ -1,13 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { HashWorkerRequest, HashWorkerResponse } from '@/workers/hashWorker';
 
-type ChunkHashCallback = (fileId: string, chunkIndex: number, hash: string) => void;
 type ChunksDoneCallback = (fileId: string, hashes: string[], fileHash: string) => void;
 type FileHashCallback = (fileId: string, hash: string) => void;
 type BufferHashCallback = (fileId: string, chunkIndex: number, hash: string) => void;
 
 interface UseHashWorkerOptions {
-  onChunkHash?: ChunkHashCallback;
   onChunksDone?: ChunksDoneCallback;
   onFileHash?: FileHashCallback;
   onBufferHash?: BufferHashCallback;
@@ -27,11 +25,9 @@ export function useHashWorker(options: UseHashWorkerOptions = {}) {
 
     workerRef.current.onmessage = (event: MessageEvent<HashWorkerResponse>) => {
       const msg = event.data;
-      const { onChunkHash, onChunksDone, onFileHash, onBufferHash } = optionsRef.current;
+      const { onChunksDone, onFileHash, onBufferHash } = optionsRef.current;
 
-      if (msg.type === 'CHUNK_HASH') {
-        onChunkHash?.(msg.fileId, msg.chunkIndex, msg.hash);
-      } else if (msg.type === 'CHUNKS_DONE') {
+      if (msg.type === 'CHUNKS_DONE') {
         onChunksDone?.(msg.fileId, msg.hashes, msg.fileHash);
       } else if (msg.type === 'FILE_HASH') {
         onFileHash?.(msg.fileId, msg.hash);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { CHUNK_SIZE } from '@/constants/transfer';
+import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
 import { isValidFileMeta } from '@/lib/chunkUtils';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useFileTransfer } from '@/hooks/useFileTransfer';
@@ -40,7 +40,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     const now = Date.now();
     const last = receiverProgressLastRef.current;
     clearTimeout(receiverProgressTimerRef.current);
-    if (now - last.time >= 250) {
+    if (now - last.time >= PROGRESS_UPDATE_MS) {
       const elapsed = (now - last.time) / 1000;
       const bytes = received * CHUNK_SIZE;
       const speedBps = last.time > 0 && elapsed > 0 ? (bytes - last.bytes) / elapsed : 0;
@@ -50,7 +50,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     } else {
       receiverProgressTimerRef.current = window.setTimeout(() => {
         updateProgress(fileId, { receivedChunks: received });
-      }, 250);
+      }, PROGRESS_UPDATE_MS);
     }
   }, [updateProgress]);
 
@@ -191,6 +191,14 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
         if (msg.type === 'TRANSFER_ACCEPT') {
           console.log('[Transfer:offerer] TRANSFER_ACCEPT received → starting transfer');
           acceptedRef.current = true;
+          // 수락은 됐지만 해싱이 아직 안 끝난 파일들 — startSending이 실제로 그 파일
+          // 차례에 도달하기 전까지는 상태를 갱신할 코드가 없어서 '수락 대기'에 그대로
+          // 멈춰 보였음. 대용량 파일은 해싱에 꽤 걸리므로 여기서 즉시 갱신.
+          for (const item of queueRef.current) {
+            if (item.status === 'waiting_accept') {
+              updateFileStatus(item.fileId, 'hashing');
+            }
+          }
           if (hashReadyCountRef.current >= expectedHashCountRef.current && expectedHashCountRef.current > 0) {
             void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
           }
