@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useHashWorker } from '@/hooks/useHashWorker';
 import { CHUNK_SIZE } from '@/constants/transfer';
 
@@ -12,42 +12,12 @@ export function useSenderHash(
   onHashReady: HashReadyCallback,
   onHashError?: (fileId: string) => void,
 ) {
-  const chunkHashesRef = useRef<Map<string, string[]>>(new Map());
-  const fileHashRef = useRef<Map<string, string>>(new Map());
-  const pendingCountRef = useRef<Map<string, number>>(new Map());
-  const totalChunksRef = useRef<Map<string, number>>(new Map());
-
-  const checkComplete = useCallback(
-    (fileId: string) => {
-      const chunksDone = chunkHashesRef.current.has(fileId);
-      const fileDone = fileHashRef.current.has(fileId);
-      const allChunksReceived =
-        (chunkHashesRef.current.get(fileId)?.length ?? 0) >=
-        (totalChunksRef.current.get(fileId) ?? Infinity);
-
-      if (chunksDone && fileDone && allChunksReceived) {
-        onHashReady(
-          fileId,
-          chunkHashesRef.current.get(fileId)!,
-          fileHashRef.current.get(fileId)!,
-        );
-        chunkHashesRef.current.delete(fileId);
-        fileHashRef.current.delete(fileId);
-        pendingCountRef.current.delete(fileId);
-        totalChunksRef.current.delete(fileId);
-      }
-    },
-    [onHashReady],
-  );
-
-  const { hashChunks, hashFile } = useHashWorker({
-    onChunksDone: (fileId, hashes) => {
-      chunkHashesRef.current.set(fileId, hashes);
-      checkComplete(fileId);
-    },
-    onFileHash: (fileId, hash) => {
-      fileHashRef.current.set(fileId, hash);
-      checkComplete(fileId);
+  // 전체 파일 해시는 청크 해시와 같은 read pass 안에서 스트리밍으로 함께 계산되어
+  // CHUNKS_DONE에 같이 실려온다 (hashWorker.ts) — 별도 HASH_FILE 왕복이나
+  // 두 결과를 기다리는 완료 대기 로직이 필요 없다.
+  const { hashChunks } = useHashWorker({
+    onChunksDone: (fileId, hashes, fileHash) => {
+      onHashReady(fileId, hashes, fileHash);
     },
     onError: onHashError
       ? (fileId, message) => {
@@ -59,12 +29,9 @@ export function useSenderHash(
 
   const computeHashes = useCallback(
     (fileId: string, file: File) => {
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      totalChunksRef.current.set(fileId, totalChunks);
       hashChunks(fileId, file, CHUNK_SIZE);
-      hashFile(fileId, file);
     },
-    [hashChunks, hashFile],
+    [hashChunks],
   );
 
   return { computeHashes };

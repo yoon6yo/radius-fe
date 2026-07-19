@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import type { HashWorkerRequest, HashWorkerResponse } from '@/workers/hashWorker';
 
 type ChunkHashCallback = (fileId: string, chunkIndex: number, hash: string) => void;
-type ChunksDoneCallback = (fileId: string, hashes: string[]) => void;
+type ChunksDoneCallback = (fileId: string, hashes: string[], fileHash: string) => void;
 type FileHashCallback = (fileId: string, hash: string) => void;
 type BufferHashCallback = (fileId: string, chunkIndex: number, hash: string) => void;
 
@@ -32,7 +32,7 @@ export function useHashWorker(options: UseHashWorkerOptions = {}) {
       if (msg.type === 'CHUNK_HASH') {
         onChunkHash?.(msg.fileId, msg.chunkIndex, msg.hash);
       } else if (msg.type === 'CHUNKS_DONE') {
-        onChunksDone?.(msg.fileId, msg.hashes);
+        onChunksDone?.(msg.fileId, msg.hashes, msg.fileHash);
       } else if (msg.type === 'FILE_HASH') {
         onFileHash?.(msg.fileId, msg.hash);
       } else if (msg.type === 'BUFFER_HASH') {
