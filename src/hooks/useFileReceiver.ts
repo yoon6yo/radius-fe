@@ -44,6 +44,7 @@ export function useFileReceiver({
   const chunkHashesRef = useRef<string[]>([]);
   const fileHashRef = useRef('');
   const metaRef = useRef<FileMeta | null>(null);
+  const chunkQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const [state, setState] = useState<FileReceiveState>({
     meta: null,
@@ -60,6 +61,7 @@ export function useFileReceiver({
         chunkHashesRef.current = [];
         fileHashRef.current = '';
         metaRef.current = msg;
+        chunkQueueRef.current = Promise.resolve();
 
         // IndexedDB에서 이전 수신 인덱스 복원
         const restored = getRestoredIndices
@@ -108,36 +110,40 @@ export function useFileReceiver({
   );
 
   // ── 바이너리 청크 처리 + 해시 검증 ─────────────────────────
+  // 청크를 직렬 큐로 처리해 OPFS 동시 write race와 TRANSFER_DONE 선행 처리를 방지
   const handleBinaryChunk = useCallback(
-    async (buffer: ArrayBuffer) => {
-      const { chunkIndex, data } = parseChunk(buffer);
+    (buffer: ArrayBuffer): void => {
+      chunkQueueRef.current = chunkQueueRef.current.then(async () => {
+        const { chunkIndex, data } = parseChunk(buffer);
 
-      // 이미 받은 청크는 건너뜀 (이어받기 시나리오)
-      if (receivedBitmap.current.has(chunkIndex)) return;
+        if (receivedBitmap.current.has(chunkIndex)) return;
 
-      const offset = chunkIndex * CHUNK_SIZE;
-      await writerRef.current?.write(data, offset);
+        const offset = chunkIndex * CHUNK_SIZE;
+        await writerRef.current?.write(data, offset);
 
-      const valid = await verifyChunkHash(
-        metaRef.current?.fileId ?? '',
-        chunkIndex,
-        data,
-      );
+        const valid = await verifyChunkHash(
+          metaRef.current?.fileId ?? '',
+          chunkIndex,
+          data,
+        );
 
-      if (valid) {
-        receivedBitmap.current.add(chunkIndex);
-        onChunkVerified?.(metaRef.current?.fileId ?? '', chunkIndex);
-        const count = receivedBitmap.current.size;
-        setState((s) => ({ ...s, receivedCount: count }));
-        onProgress?.(metaRef.current?.fileId ?? '', count, metaRef.current?.totalChunks ?? 0);
-      }
-      // 검증 실패 → 비트맵 미기록 → 재연결 시 자동 재요청 대상
+        if (valid) {
+          receivedBitmap.current.add(chunkIndex);
+          onChunkVerified?.(metaRef.current?.fileId ?? '', chunkIndex);
+          const count = receivedBitmap.current.size;
+          setState((s) => ({ ...s, receivedCount: count }));
+          onProgress?.(metaRef.current?.fileId ?? '', count, metaRef.current?.totalChunks ?? 0);
+        }
+      }).catch(() => {});
     },
-    [verifyChunkHash, onChunkVerified],
+    [verifyChunkHash, onChunkVerified, onProgress],
   );
 
   // ── 전송 완료 처리 ──────────────────────────────────────────
   const handleTransferDone = async (msg: TransferDone) => {
+    // TRANSFER_DONE 수신 시점에 아직 처리 중인 청크가 있을 수 있으므로 큐가 비워질 때까지 대기
+    await chunkQueueRef.current;
+
     const meta = metaRef.current;
     if (!meta || meta.fileId !== msg.fileId) return;
 
