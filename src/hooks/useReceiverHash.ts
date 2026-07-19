@@ -43,9 +43,9 @@ export function useReceiverHash() {
       return new Promise((resolve) => {
         const key = `${fileId}:${chunkIndex}`;
         pendingRef.current.set(key, resolve);
-        // ArrayBuffer를 transfer하여 복사 오버헤드 제거
-        const copy = data.slice(0);
-        hashBuffer(fileId, copy, chunkIndex);
+        // data는 parseChunk()가 만든 단독 소유 버퍼이고 이 호출 이후 재사용되지 않으므로
+        // 복사 없이 그대로 worker로 transfer한다 (postMessage의 transfer 리스트, hashBuffer 참고)
+        hashBuffer(fileId, data, chunkIndex);
       });
     },
     [hashBuffer],

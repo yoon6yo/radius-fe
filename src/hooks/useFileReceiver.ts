@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { OPFSFileWriter, exportFromOPFS, deleteFromOPFS } from '@/lib/fileWriter';
 import { parseChunk } from '@/lib/chunkUtils';
-import { CHUNK_SIZE } from '@/constants/transfer';
+import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
 import type { FileWriter } from '@/lib/fileWriter';
 import type {
   FileMeta,
@@ -45,6 +45,11 @@ export function useFileReceiver({
   const fileHashRef = useRef('');
   const metaRef = useRef<FileMeta | null>(null);
   const chunkQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // state.receivedCount는 현재 어떤 UI도 구독하지 않지만, 매 청크마다 setState하면
+  // 이 훅을 호출하는 컴포넌트가 파일당 수천 번 리렌더된다. 다른 진행률 갱신과
+  // 동일하게 leading+trailing 스로틀을 적용해 리렌더 횟수를 줄인다.
+  const lastStateFlushRef = useRef(0);
+  const stateFlushTimerRef = useRef(0);
 
   const [state, setState] = useState<FileReceiveState>({
     meta: null,
@@ -62,6 +67,8 @@ export function useFileReceiver({
         fileHashRef.current = '';
         metaRef.current = msg;
         chunkQueueRef.current = Promise.resolve();
+        lastStateFlushRef.current = 0;
+        clearTimeout(stateFlushTimerRef.current);
 
         // IndexedDB에서 이전 수신 인덱스 복원
         const restored = getRestoredIndices
@@ -131,7 +138,19 @@ export function useFileReceiver({
           receivedBitmap.current.add(chunkIndex);
           onChunkVerified?.(metaRef.current?.fileId ?? '', chunkIndex);
           const count = receivedBitmap.current.size;
-          setState((s) => ({ ...s, receivedCount: count }));
+
+          const now = Date.now();
+          clearTimeout(stateFlushTimerRef.current);
+          if (now - lastStateFlushRef.current >= PROGRESS_UPDATE_MS) {
+            lastStateFlushRef.current = now;
+            setState((s) => ({ ...s, receivedCount: count }));
+          } else {
+            stateFlushTimerRef.current = window.setTimeout(() => {
+              lastStateFlushRef.current = Date.now();
+              setState((s) => ({ ...s, receivedCount: count }));
+            }, PROGRESS_UPDATE_MS);
+          }
+
           onProgress?.(metaRef.current?.fileId ?? '', count, metaRef.current?.totalChunks ?? 0);
         }
       }).catch(() => {});
