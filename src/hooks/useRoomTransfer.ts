@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { CHUNK_SIZE } from '@/constants/transfer';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useFileTransfer } from '@/hooks/useFileTransfer';
 import { useFileReceiver } from '@/hooks/useFileReceiver';
@@ -16,7 +17,7 @@ interface UseRoomTransferOptions {
 
 export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {}) {
   const { role, token } = useRoomStore();
-  const { queue, isLocked, updateFileStatus, setPendingRequest, clearPendingRequest } = useTransferStore();
+  const { queue, isLocked, updateFileStatus, updateProgress, advanceQueue, setPendingRequest, clearPendingRequest, addReceivedFile } = useTransferStore();
 
   const sendControlRef = useRef<(msg: ControlMessage) => void>(() => {});
   const getPcRef = useRef<() => import('@/lib/webrtc').PeerConnection | null>(() => null);
@@ -32,6 +33,29 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   // ── 수신 측 ─────────────────────────────────────────────────
   const { setChunkHashes, verifyChunkHash, verifyFileHash } = useReceiverHash();
 
+  const onReceiverProgress = useCallback((fileId: string, received: number, total: number) => {
+    const now = Date.now();
+    const last = receiverProgressLastRef.current;
+    clearTimeout(receiverProgressTimerRef.current);
+    if (now - last.time >= 250) {
+      const elapsed = (now - last.time) / 1000;
+      const bytes = received * CHUNK_SIZE;
+      const speedBps = last.time > 0 && elapsed > 0 ? (bytes - last.bytes) / elapsed : 0;
+      const etaSeconds = speedBps > 0 ? ((total - received) * CHUNK_SIZE) / speedBps : 0;
+      receiverProgressLastRef.current = { time: now, bytes };
+      updateProgress(fileId, { receivedChunks: received, speedBps, etaSeconds });
+    } else {
+      receiverProgressTimerRef.current = window.setTimeout(() => {
+        updateProgress(fileId, { receivedChunks: received });
+      }, 250);
+    }
+  }, [updateProgress]);
+
+  const onReceiverFileDone = useCallback((fileId: string) => {
+    updateFileStatus(fileId, 'done');
+    advanceQueue();
+  }, [updateFileStatus, advanceQueue]);
+
   const { handleControl, handleBinaryChunk, getChunkHashes } = useFileReceiver({
     sendControl: (msg) => sendControlRef.current(msg),
     verifyChunkHash,
@@ -39,6 +63,8 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     onChunkVerified: recordChunkReceived,
     onTransferComplete: completeTransfer,
     getRestoredIndices: async (fileId) => getReceivedIndices(fileId),
+    onProgress: onReceiverProgress,
+    onFileDone: onReceiverFileDone,
   });
 
   // ── 송신 측 ─────────────────────────────────────────────────
@@ -54,6 +80,9 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   const hashReadyCountRef = useRef(0);
   const expectedHashCountRef = useRef(0);
   const acceptedRef = useRef(false);
+
+  const receiverProgressLastRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
+  const receiverProgressTimerRef = useRef(0);
 
   const { computeHashes } = useSenderHash(
     (fileId, chunkHashes, fileHash) => {
@@ -128,6 +157,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
           try {
             if (msg.type === 'FILE_META') {
               console.log('[Transfer:answerer] FILE_META received:', msg.fileId);
+              addReceivedFile(msg.fileId, msg.fileName, msg.fileSize, msg.totalChunks);
               await initTransferRecord({
                 fileId: msg.fileId,
                 token: token ?? '',
@@ -172,7 +202,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
       }
     },
     [role, token, handleControl, setChunkHashes, getChunkHashes, resolveReady, resolveVerify,
-     initTransferRecord, updateFileStatus, setPendingRequest],
+     initTransferRecord, updateFileStatus, setPendingRequest, addReceivedFile],
   );
 
   const onBinaryChunk = useCallback(

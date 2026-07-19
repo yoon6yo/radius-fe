@@ -14,6 +14,7 @@ interface TransferState {
   pendingRequest: PendingFileInfo[] | null;
 
   addFiles: (files: File[]) => void;
+  addReceivedFile: (fileId: string, fileName: string, fileSize: number, totalChunks: number) => void;
   removeFile: (fileId: string) => void;
   lockQueue: () => void;
   updateFileStatus: (fileId: string, status: TransferStatus) => void;
@@ -42,6 +43,8 @@ export const useTransferStore = create<TransferState>((set) => ({
       if (s.isLocked) return s;
       const newItems: QueuedFile[] = files.map((file) => ({
         fileId: generateFileId(),
+        fileName: file.name,
+        fileSize: file.size,
         file,
         status: 'queued',
         totalChunks: 0,
@@ -52,6 +55,26 @@ export const useTransferStore = create<TransferState>((set) => ({
       }));
       return { queue: [...s.queue, ...newItems] };
     }),
+
+  addReceivedFile: (fileId, fileName, fileSize, totalChunks) =>
+    set((s) => ({
+      queue: [
+        ...s.queue,
+        {
+          fileId,
+          fileName,
+          fileSize,
+          file: undefined,
+          status: 'transferring' as const,
+          totalChunks,
+          sentChunks: 0,
+          receivedChunks: 0,
+          speedBps: 0,
+          etaSeconds: 0,
+        },
+      ],
+      isLocked: true,
+    })),
 
   removeFile: (fileId) =>
     set((s) => {

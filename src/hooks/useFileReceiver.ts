@@ -22,10 +22,11 @@ interface UseFileReceiverOptions {
   sendControl: (msg: ControlMessage) => void;
   verifyChunkHash: (fileId: string, chunkIndex: number, data: ArrayBuffer) => Promise<boolean>;
   verifyFileHash: (fileId: string, fileName: string, expectedHash: string) => Promise<boolean>;
-  // IndexedDB 비트맵 영속화 연동
   onChunkVerified?: (fileId: string, chunkIndex: number) => void;
   onTransferComplete?: (fileId: string) => Promise<void>;
   getRestoredIndices?: (fileId: string) => Promise<number[]>;
+  onProgress?: (fileId: string, received: number, total: number) => void;
+  onFileDone?: (fileId: string) => void;
 }
 
 export function useFileReceiver({
@@ -35,6 +36,8 @@ export function useFileReceiver({
   onChunkVerified,
   onTransferComplete,
   getRestoredIndices,
+  onProgress,
+  onFileDone,
 }: UseFileReceiverOptions) {
   const writerRef = useRef<FileWriter | null>(null);
   const receivedBitmap = useRef<Set<number>>(new Set());
@@ -124,7 +127,9 @@ export function useFileReceiver({
       if (valid) {
         receivedBitmap.current.add(chunkIndex);
         onChunkVerified?.(metaRef.current?.fileId ?? '', chunkIndex);
-        setState((s) => ({ ...s, receivedCount: receivedBitmap.current.size }));
+        const count = receivedBitmap.current.size;
+        setState((s) => ({ ...s, receivedCount: count }));
+        onProgress?.(metaRef.current?.fileId ?? '', count, metaRef.current?.totalChunks ?? 0);
       }
       // 검증 실패 → 비트맵 미기록 → 재연결 시 자동 재요청 대상
     },
@@ -164,6 +169,7 @@ export function useFileReceiver({
       await onTransferComplete?.(msg.fileId);
       sendControl({ type: 'VERIFY_OK', fileId: msg.fileId });
       setState((s) => ({ ...s, exportPhase: 'done' }));
+      onFileDone?.(msg.fileId);
       await deleteFromOPFS(meta.fileName);
     } catch (err) {
       // OPFS 오류, 내보내기 실패, onTransferComplete 예외 — 모두 sender에게 알림

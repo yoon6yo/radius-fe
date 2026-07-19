@@ -67,9 +67,9 @@ export function FileQueueItem({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-gray-900 truncate">{item.file.name}</p>
+          <p className="text-sm font-medium text-gray-900 truncate">{item.fileName}</p>
           <p className="text-xs text-gray-400 mt-0.5">
-            {formatBytes(item.file.size)}
+            {formatBytes(item.fileSize)}
             {isActive && item.speedBps > 0 && (
               <> · {formatSpeed(item.speedBps)} · 남은 시간 {formatEta(item.etaSeconds)}</>
             )}

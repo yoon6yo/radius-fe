@@ -100,7 +100,9 @@ export type TransferStatus =
 
 export interface QueuedFile {
   fileId: string;
-  file: File;
+  fileName: string;
+  fileSize: number;
+  file?: File;
   status: TransferStatus;
   totalChunks: number;
   sentChunks: number;

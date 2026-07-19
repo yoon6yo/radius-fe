@@ -54,7 +54,7 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
       console.log('[Sender] startSending from index', liveIndex, 'queue length:', liveQueue.length);
       for (let i = liveIndex; i < liveQueue.length; i++) {
         const item: QueuedFile = liveQueue[i];
-        console.log('[Sender] processing file:', item.fileId, item.file.name);
+        console.log('[Sender] processing file:', item.fileId, item.fileName);
         updateFileStatus(item.fileId, 'waiting_ready');
 
         // 루프 도중 파일이 제거됐을 가능성 대비 — store에서 다시 확인
@@ -78,9 +78,10 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
 
         const chunkHashes = chunkHashesByFileId.get(item.fileId) ?? [];
         const fileHash = fileHashByFileId.get(item.fileId) ?? '';
-        const totalChunks = calcTotalChunks(item.file.size);
+        const totalChunks = calcTotalChunks(item.fileSize);
         updateProgress(item.fileId, { totalChunks });
 
+        if (!item.file) break;
         await sender.sendFile(
           item.file,
           item.fileId,

@@ -58,9 +58,14 @@ export function useWebRTC({
       if (state === 'connected') {
         setPhase('peer_connected');
         void pcRef.current?.isRelayed().then(setIsRelayed);
+        // ICE 재연결 후 DataChannel이 여전히 열려있으면 channelReady 복원
+        if (pcRef.current?.isChannelOpen) {
+          setChannelReady(true);
+        }
       } else if (state === 'disconnected' || state === 'failed') {
         setPhase('peer_disconnected');
-        setChannelReady(false);
+        // channelReady는 DataChannel의 onclose 이벤트(handleChannelClose)에서만 false로 변경.
+        // ICE 일시 단절은 DataChannel을 닫지 않으므로 여기서 변경하지 않음.
       }
     },
     [],
