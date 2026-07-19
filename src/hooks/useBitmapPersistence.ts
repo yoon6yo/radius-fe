@@ -2,7 +2,9 @@ import { useCallback, useRef } from 'react';
 import {
   saveTransfer,
   getTransfer,
-  updateReceivedIndices,
+  addReceivedBatch,
+  getReceivedChunkIndices,
+  clearReceivedBatches,
   markTransferDone,
   getPendingTransfersByToken,
 } from '@/lib/indexeddb';
@@ -18,12 +20,14 @@ export function useBitmapPersistence() {
 
   // ── 전송 레코드 초기화 ───────────────────────────────────────
   const initTransferRecord = useCallback(
-    async (record: Omit<TransferRecord, 'receivedIndices' | 'status'>): Promise<number[]> => {
+    async (record: Omit<TransferRecord, 'status'>): Promise<number[]> => {
       const existing = await getTransfer(record.fileId);
       if (existing && existing.status === 'pending') {
-        return existing.receivedIndices;
+        return getReceivedChunkIndices(record.fileId);
       }
-      await saveTransfer({ ...record, receivedIndices: [], status: 'pending' });
+      await saveTransfer({ ...record, status: 'pending' });
+      // 같은 fileId로 이전에 남아있던 배치가 있다면 정리 (새 전송 시작이므로)
+      await clearReceivedBatches(record.fileId);
       return [];
     },
     [],
@@ -33,6 +37,7 @@ export function useBitmapPersistence() {
   // debounce만 쓰면 fast LAN에서 청크가 연속으로 오는 동안 flush가 무기한 지연됨.
   // 대신 마지막 flush 이후 FLUSH_INTERVAL_MS가 지나면 즉시 flush하고,
   // trailing-edge 타이머도 남겨서 마지막 청크도 반드시 기록함.
+  // flush는 기존 배치를 읽어 병합하지 않고 새 배치를 그냥 추가만 한다 (addReceivedBatch).
   const recordChunkReceived = useCallback((fileId: string, chunkIndex: number) => {
     const current = pendingBitmapRef.current.get(fileId) ?? [];
     current.push(chunkIndex);
@@ -44,7 +49,7 @@ export function useBitmapPersistence() {
       clearTimeout(flushTimerRef.current);
       lastFlushTimeRef.current = now;
       for (const [fid, indices] of pendingBitmapRef.current) {
-        void updateReceivedIndices(fid, indices);
+        void addReceivedBatch(fid, indices);
       }
       pendingBitmapRef.current.clear();
     } else {
@@ -53,7 +58,7 @@ export function useBitmapPersistence() {
       flushTimerRef.current = window.setTimeout(() => {
         lastFlushTimeRef.current = Date.now();
         for (const [fid, indices] of pendingBitmapRef.current) {
-          void updateReceivedIndices(fid, indices);
+          void addReceivedBatch(fid, indices);
         }
         pendingBitmapRef.current.clear();
       }, FLUSH_INTERVAL_MS);
@@ -65,7 +70,7 @@ export function useBitmapPersistence() {
     clearTimeout(flushTimerRef.current);
     const indices = pendingBitmapRef.current.get(fileId);
     if (indices) {
-      await updateReceivedIndices(fileId, indices);
+      await addReceivedBatch(fileId, indices);
       pendingBitmapRef.current.delete(fileId);
     }
   }, []);
@@ -74,6 +79,8 @@ export function useBitmapPersistence() {
   const completeTransfer = useCallback(async (fileId: string) => {
     await flushNow(fileId);
     await markTransferDone(fileId);
+    // 완료됐으니 배치 기록은 더 필요 없음 — 정리해서 DB가 무한정 커지지 않게 함
+    await clearReceivedBatches(fileId);
   }, [flushNow]);
 
   // ── 재진입 시 미완료 전송 목록 조회 ─────────────────────────
@@ -84,8 +91,7 @@ export function useBitmapPersistence() {
 
   // ── 특정 파일의 수신 인덱스 조회 ─────────────────────────────
   const getReceivedIndices = useCallback(async (fileId: string): Promise<number[]> => {
-    const record = await getTransfer(fileId);
-    return record?.receivedIndices ?? [];
+    return getReceivedChunkIndices(fileId);
   }, []);
 
   return {

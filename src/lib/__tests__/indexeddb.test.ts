@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import {
   _resetDB,
   saveSession,
@@ -8,7 +8,9 @@ import {
   getActiveSession,
   saveTransfer,
   getTransfer,
-  updateReceivedIndices,
+  addReceivedBatch,
+  getReceivedChunkIndices,
+  clearReceivedBatches,
   markTransferDone,
   getPendingTransfersByToken,
 } from '@/lib/indexeddb';
@@ -16,6 +18,7 @@ import type { SessionRecord, TransferRecord } from '@/types/transfer';
 
 beforeEach(() => {
   global.indexedDB = new IDBFactory();
+  global.IDBKeyRange = IDBKeyRange;
   _resetDB();
 });
 
@@ -35,7 +38,6 @@ const makeTransfer = (override: Partial<TransferRecord> = {}): TransferRecord =>
   totalChunks: 1,
   fileHash: 'abc123',
   chunkHashes: ['h0'],
-  receivedIndices: [],
   status: 'pending',
   ...override,
 });
@@ -95,34 +97,62 @@ describe('saveTransfer / getTransfer', () => {
   });
 });
 
-describe('updateReceivedIndices', () => {
-  it('기존 인덱스에 새 인덱스를 append한다 (replace 아님)', async () => {
-    await saveTransfer(makeTransfer({ receivedIndices: [0, 1, 2] }));
-    await updateReceivedIndices('file-001', [3, 4, 5]);
-    const result = await getTransfer('file-001');
-    expect(result?.receivedIndices.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+describe('addReceivedBatch / getReceivedChunkIndices', () => {
+  it('배치를 추가하면 조회 시 포함된다', async () => {
+    await saveTransfer(makeTransfer());
+    await addReceivedBatch('file-001', [0, 1, 2]);
+    const result = await getReceivedChunkIndices('file-001');
+    expect(result.sort((a, b) => a - b)).toEqual([0, 1, 2]);
   });
 
-  it('중복 인덱스는 제거된다', async () => {
-    await saveTransfer(makeTransfer({ receivedIndices: [0, 1] }));
-    await updateReceivedIndices('file-001', [1, 2]); // 1 중복
-    const result = await getTransfer('file-001');
-    expect(result?.receivedIndices.sort((a, b) => a - b)).toEqual([0, 1, 2]);
+  it('중복 인덱스는 제거된다 (여러 배치에 걸쳐서도)', async () => {
+    await saveTransfer(makeTransfer());
+    await addReceivedBatch('file-001', [0, 1]);
+    await addReceivedBatch('file-001', [1, 2]); // 1 중복
+    const result = await getReceivedChunkIndices('file-001');
+    expect(result.sort((a, b) => a - b)).toEqual([0, 1, 2]);
   });
 
-  it('여러 번 flush해도 누적이 유지된다', async () => {
-    await saveTransfer(makeTransfer({ receivedIndices: [] }));
+  it('여러 번 flush(배치 추가)해도 누적이 유지된다 — 매번 전체를 재조회할 필요 없음', async () => {
+    await saveTransfer(makeTransfer());
 
-    await updateReceivedIndices('file-001', [0, 1]);
-    await updateReceivedIndices('file-001', [2, 3]);
-    await updateReceivedIndices('file-001', [4]);
+    await addReceivedBatch('file-001', [0, 1]);
+    await addReceivedBatch('file-001', [2, 3]);
+    await addReceivedBatch('file-001', [4]);
 
-    const result = await getTransfer('file-001');
-    expect(result?.receivedIndices.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    const result = await getReceivedChunkIndices('file-001');
+    expect(result.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
   });
 
-  it('레코드가 없으면 아무것도 하지 않는다', async () => {
-    await expect(updateReceivedIndices('no-file', [0])).resolves.toBeUndefined();
+  it('빈 배열을 추가해도 오류 없이 무시된다', async () => {
+    await expect(addReceivedBatch('file-001', [])).resolves.toBeUndefined();
+  });
+
+  it('배치가 없는 fileId는 빈 배열을 반환한다', async () => {
+    expect(await getReceivedChunkIndices('no-file')).toEqual([]);
+  });
+
+  it('다른 fileId의 배치는 섞이지 않는다', async () => {
+    await addReceivedBatch('file-001', [0, 1]);
+    await addReceivedBatch('file-002', [9]);
+    expect((await getReceivedChunkIndices('file-001')).sort()).toEqual([0, 1]);
+    expect(await getReceivedChunkIndices('file-002')).toEqual([9]);
+  });
+});
+
+describe('clearReceivedBatches', () => {
+  it('해당 fileId의 배치만 모두 삭제한다', async () => {
+    await addReceivedBatch('file-001', [0, 1]);
+    await addReceivedBatch('file-002', [9]);
+
+    await clearReceivedBatches('file-001');
+
+    expect(await getReceivedChunkIndices('file-001')).toEqual([]);
+    expect(await getReceivedChunkIndices('file-002')).toEqual([9]);
+  });
+
+  it('배치가 없어도 오류 없이 끝난다', async () => {
+    await expect(clearReceivedBatches('no-file')).resolves.toBeUndefined();
   });
 });
 

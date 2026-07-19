@@ -21,7 +21,6 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
   const { role } = useRoomStore();
 
   const senderRef = useRef<FileSender | null>(null);
-  const progressTimerRef = useRef<number>(0);
   const lastProgressRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
 
   // fileId → readySignal resolver (HASH_DONE 후 READY/RESUME 대기)
@@ -147,11 +146,7 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
     const etaSeconds = speedBps > 0 ? (remaining * CHUNK_SIZE) / speedBps : 0;
 
     lastProgressRef.current = { time: now, bytes: bytesSent };
-
-    clearTimeout(progressTimerRef.current);
-    progressTimerRef.current = window.setTimeout(() => {
-      updateProgress(fileId, { sentChunks: sent, speedBps, etaSeconds });
-    }, 0);
+    updateProgress(fileId, { sentChunks: sent, speedBps, etaSeconds });
   };
 
   return { startSending, resolveReady, resolveVerify, abortCurrent };

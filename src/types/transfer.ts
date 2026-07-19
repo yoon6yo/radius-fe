@@ -83,9 +83,11 @@ export interface TransferRecord {
   totalChunks: number;
   fileHash: string;
   chunkHashes: string[];
-  receivedIndices: number[];
   status: 'pending' | 'done';
 }
+
+// 수신 청크 인덱스는 별도의 append-only 스토어(receivedBatches)에 배치 단위로 저장된다
+// (src/lib/indexeddb.ts의 addReceivedBatch/getReceivedChunkIndices 참고).
 
 // 전송 큐 항목 (Zustand 상태용)
 export type TransferStatus =
