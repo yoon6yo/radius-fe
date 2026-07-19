@@ -49,6 +49,7 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
     async (
       chunkHashesByFileId: Map<string, string[]>,
       fileHashByFileId: Map<string, string>,
+      waitForHashReady: (fileId: string) => Promise<void>,
     ) => {
       if (role !== 'offerer') return;
       lockQueue();
@@ -59,7 +60,6 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
       for (let i = liveIndex; i < liveQueue.length; i++) {
         const item: QueuedFile = liveQueue[i];
         console.log('[Sender] processing file:', item.fileId, item.fileName);
-        updateFileStatus(item.fileId, 'waiting_ready');
 
         // 루프 도중 파일이 제거됐을 가능성 대비 — store에서 다시 확인
         const stillExists = useTransferStore.getState().queue.some((q) => q.fileId === item.fileId);
@@ -67,6 +67,14 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
 
         const pc = getPeerConnection();
         if (!pc) break;
+
+        // 이 파일 하나의 해시만 기다린다 — 나머지 파일 해싱은 백그라운드에서 계속 진행되며,
+        // 여기서 4개 전부 끝나길 기다리지 않아야 첫 파일이 빨리 전송을 시작할 수 있다.
+        if (!chunkHashesByFileId.has(item.fileId)) {
+          updateFileStatus(item.fileId, 'hashing');
+          await waitForHashReady(item.fileId);
+        }
+        updateFileStatus(item.fileId, 'waiting_ready');
 
         const sender = new FileSender(pc);
         senderRef.current = sender;

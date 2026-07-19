@@ -80,28 +80,35 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
 
   const chunkHashesByFileId = useRef<Map<string, string[]>>(new Map());
   const fileHashByFileId = useRef<Map<string, string>>(new Map());
+  // 파일별로 해시가 준비되길 기다리는 쪽에 알려주기 위한 resolver — 큐에 여러 파일이
+  // 있어도 "전부 해싱 끝날 때까지" 기다리지 않고, startSending이 그 파일 차례에 왔을 때
+  // 그 파일 하나의 해시만 기다리도록 하기 위함 (해싱은 순서대로 끝나므로 실질적으로
+  // 첫 파일은 거의 기다리지 않고, 뒤 파일들은 앞 파일 전송 시간 동안 이미 끝나있는 경우가 많음)
+  const hashReadyResolversRef = useRef<Map<string, () => void>>(new Map());
   const hashReadyCountRef = useRef(0);
   const expectedHashCountRef = useRef(0);
   const acceptedRef = useRef(false);
+
+  const waitForHashReady = useCallback((fileId: string): Promise<void> => {
+    if (chunkHashesByFileId.current.has(fileId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      hashReadyResolversRef.current.set(fileId, resolve);
+    });
+  }, []);
 
   const receiverProgressLastRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
   const receiverProgressTimerRef = useRef(0);
 
   const { computeHashes } = useSenderHash(
     (fileId, chunkHashes, fileHash) => {
+      hashReadyCountRef.current++;
       console.log('[Transfer] hash ready:', fileId, 'chunks:', chunkHashes.length,
-        '(', hashReadyCountRef.current + 1, '/', expectedHashCountRef.current, ')');
+        '(', hashReadyCountRef.current, '/', expectedHashCountRef.current, ')');
       chunkHashesByFileId.current.set(fileId, chunkHashes);
       fileHashByFileId.current.set(fileId, fileHash);
-      hashReadyCountRef.current++;
-      if (hashReadyCountRef.current >= expectedHashCountRef.current) {
-        if (acceptedRef.current) {
-          console.log('[Transfer] all hashes ready + accepted → startSending');
-          void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
-        } else {
-          console.log('[Transfer] all hashes ready, waiting for TRANSFER_ACCEPT');
-        }
-      }
+      // 이 파일 차례를 기다리고 있던 startSending 루프가 있으면 즉시 깨움
+      hashReadyResolversRef.current.get(fileId)?.();
+      hashReadyResolversRef.current.delete(fileId);
     },
     (fileId) => {
       console.error('[Transfer] hash worker error for:', fileId);
@@ -118,6 +125,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     acceptedRef.current = false;
     chunkHashesByFileId.current.clear();
     fileHashByFileId.current.clear();
+    hashReadyResolversRef.current.clear();
     hashReadyCountRef.current = 0;
     expectedHashCountRef.current = currentQueue.length;
 
@@ -143,9 +151,9 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     if (!acceptedRef.current) return;
     const hasWaiting = queueRef.current.some((f) => f.status === 'waiting_ready');
     if (hasWaiting && chunkHashesByFileId.current.size > 0) {
-      void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
+      void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current, waitForHashReady);
     }
-  }, [role]);
+  }, [role, waitForHashReady]);
 
   // ── 제어 메시지 라우터 ────────────────────────────────────────
   const onControlMessage = useCallback(
@@ -191,16 +199,15 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
         if (msg.type === 'TRANSFER_ACCEPT') {
           console.log('[Transfer:offerer] TRANSFER_ACCEPT received → starting transfer');
           acceptedRef.current = true;
-          // 수락은 됐지만 해싱이 아직 안 끝난 파일들 — startSending이 실제로 그 파일
-          // 차례에 도달하기 전까지는 상태를 갱신할 코드가 없어서 '수락 대기'에 그대로
-          // 멈춰 보였음. 대용량 파일은 해싱에 꽤 걸리므로 여기서 즉시 갱신.
-          for (const item of queueRef.current) {
-            if (item.status === 'waiting_accept') {
-              updateFileStatus(item.fileId, 'hashing');
-            }
-          }
-          if (hashReadyCountRef.current >= expectedHashCountRef.current && expectedHashCountRef.current > 0) {
-            void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
+          // 큐의 모든 파일을 여기서 일괄로 'hashing'으로 바꾸지 않는다 — 워커는 파일을
+          // 순서대로 하나씩만 해싱하므로, 뒤 순서 파일들은 실제로는 그냥 대기 중인데
+          // '해싱 중'이라고 계속 표시되는 부정확한 상태가 됨. 정확한 전환은
+          // startSending 루프 안에서 그 파일 차례가 왔을 때만 이뤄진다.
+          // 파일 전부의 해싱이 끝나길 기다리지 않고 바로 시작 — startSending이 각 파일
+          // 차례에서 그 파일 하나의 해시만(waitForHashReady) 기다리므로, 첫 파일 해시만
+          // 준비되면 즉시 전송이 시작된다.
+          if (expectedHashCountRef.current > 0) {
+            void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current, waitForHashReady);
           }
         }
         if (msg.type === 'TRANSFER_REJECT') {
@@ -219,7 +226,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
       }
     },
     [role, token, handleControl, setChunkHashes, getChunkHashes, resolveReady, resolveVerify,
-     initTransferRecord, updateFileStatus, setPendingRequest, addReceivedFile],
+     initTransferRecord, updateFileStatus, setPendingRequest, addReceivedFile, waitForHashReady],
   );
 
   const onBinaryChunk = useCallback(
