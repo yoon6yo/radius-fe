@@ -25,6 +25,8 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   queueRef.current = queue;
   const isLockedRef = useRef(isLocked);
   isLockedRef.current = isLocked;
+  // 수신 측 제어 메시지 순차 처리 큐 — FILE_META 셋업 완료 전 HASH_DONE이 READY를 보내는 race 방지
+  const controlQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // ── IndexedDB 이어받기 영속화 ────────────────────────────────
   const { initTransferRecord, recordChunkReceived, completeTransfer, getReceivedIndices } =
@@ -153,7 +155,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
           setPendingRequest((msg as TransferRequest).files);
           return;
         }
-        void (async () => {
+        controlQueueRef.current = controlQueueRef.current.then(async () => {
           try {
             if (msg.type === 'FILE_META') {
               console.log('[Transfer:answerer] FILE_META received:', msg.fileId);
@@ -177,7 +179,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
           } catch (err) {
             console.error('[Transfer:answerer] onControlMessage error for', msg.type, ':', err);
           }
-        })();
+        });
       } else {
         if (msg.type === 'TRANSFER_ACCEPT') {
           console.log('[Transfer:offerer] TRANSFER_ACCEPT received → starting transfer');
