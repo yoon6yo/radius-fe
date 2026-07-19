@@ -99,6 +99,9 @@ export class FileSender {
     }
   }
 
+  // bufferedAmount는 send() 호출 "이후"에만 갱신되므로, 다음 청크를 읽기 전이 아니라
+  // 방금 보낸 청크의 send() 직후에 체크해야 실제 백프레셔로 작동한다.
+  // (읽기+전송을 순차 처리해 send()를 실제로 호출한 뒤 버퍼를 확인하도록 함)
   private async sendChunks(
     file: File,
     _fileId: string,
@@ -107,43 +110,45 @@ export class FileSender {
   ): Promise<void> {
     this.pc.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD;
 
-    const pending: Promise<void>[] = [];
+    for (let cursor = 0; cursor < indices.length; cursor++) {
+      if (this.aborted) return;
 
+      // 채널이 닫혔으면 즉시 abort (silent no-op 방지)
+      if (!this.pc.isChannelOpen) {
+        this.aborted = true;
+        return;
+      }
+
+      const chunkIndex = indices[cursor];
+      const start = chunkIndex * CHUNK_SIZE;
+      const slice = file.slice(start, start + CHUNK_SIZE);
+      const data = await slice.arrayBuffer();
+
+      const packet = buildChunk(chunkIndex, data);
+      this.pc.sendBinary(packet);
+      onProgress(cursor + 1);
+
+      if (this.pc.bufferedAmount > BUFFER_HIGH_THRESHOLD) {
+        await this.waitForBufferDrain();
+      }
+    }
+  }
+
+  // bufferedamountlow 이벤트 또는 abort/채널 종료 중 먼저 오는 쪽에서 resolve.
+  // 이벤트가 오지 않는 상황(채널 종료 등)에서도 영구 대기하지 않도록 폴링으로 탈출구를 둔다.
+  private waitForBufferDrain(): Promise<void> {
     return new Promise((resolve) => {
-      let cursor = 0;
-
-      const sendNext = () => {
-        while (cursor < indices.length && !this.aborted) {
-          // 채널이 닫혔으면 즉시 abort (silent no-op 방지)
-          if (!this.pc.isChannelOpen) {
-            this.aborted = true;
-            break;
-          }
-
-          if (this.pc.bufferedAmount > BUFFER_HIGH_THRESHOLD) {
-            this.pc.onBufferedAmountLow(sendNext);
-            return;
-          }
-
-          const chunkIndex = indices[cursor++];
-          const sentSoFar = cursor; // 클로저 캡처 — then() 내에서 cursor가 더 진행돼도 정확
-          const start = chunkIndex * CHUNK_SIZE;
-          const slice = file.slice(start, start + CHUNK_SIZE);
-
-          const p = slice.arrayBuffer().then((data) => {
-            const packet = buildChunk(chunkIndex, data);
-            this.pc.sendBinary(packet);
-            onProgress(sentSoFar);
-          });
-          pending.push(p);
-        }
-
-        if (cursor >= indices.length || this.aborted) {
-          void Promise.all(pending).then(() => resolve());
-        }
+      let pollId: ReturnType<typeof setInterval> | undefined;
+      const finish = () => {
+        clearInterval(pollId);
+        this.pc.onBufferedAmountLow(() => {});
+        resolve();
       };
 
-      sendNext();
+      this.pc.onBufferedAmountLow(finish);
+      pollId = setInterval(() => {
+        if (this.aborted || !this.pc.isChannelOpen) finish();
+      }, 50);
     });
   }
 }

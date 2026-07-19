@@ -2,7 +2,12 @@ import { useCallback, useRef } from 'react';
 import { useTransferStore } from '@/store/transferStore';
 import { useRoomStore } from '@/store/roomStore';
 import { FileSender } from '@/lib/sender';
-import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
+import {
+  CHUNK_SIZE,
+  PROGRESS_UPDATE_MS,
+  VERIFY_TIMEOUT_MIN_MS,
+  VERIFY_ASSUMED_MIN_BPS,
+} from '@/constants/transfer';
 import { calcTotalChunks } from '@/lib/chunkUtils';
 import type { PeerConnection } from '@/lib/webrtc';
 import type { ReadyMsg, ResumeMsg, QueuedFile, VerifyOk, VerifyFail } from '@/types/transfer';
@@ -101,11 +106,17 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
           break;
         }
 
-        // TRANSFER_DONE 전송 후 수신측 검증 결과 대기 (30초 타임아웃)
+        // TRANSFER_DONE 전송 후 수신측 검증 결과 대기.
+        // 타임아웃은 고정값이 아니라 파일 크기 기준 최소 처리량으로 산정 — 대용량 파일이
+        // 실전송을 마치기 전에 먼저 타임아웃되는 것을 방지한다.
         updateFileStatus(item.fileId, 'verifying');
+        const verifyTimeoutMs = Math.max(
+          VERIFY_TIMEOUT_MIN_MS,
+          (item.fileSize / VERIFY_ASSUMED_MIN_BPS) * 1000,
+        );
         const verified = await Promise.race([
           verifySignal,
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 30_000)),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), verifyTimeoutMs)),
         ]);
 
         if (verified) {
