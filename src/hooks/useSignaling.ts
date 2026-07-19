@@ -4,20 +4,29 @@ import { socket } from '@/lib/socket';
 import { fetchIceServers } from '@/lib/iceConfig';
 import { saveSession, getActiveSession, deleteSession } from '@/lib/indexeddb';
 import { useRoomStore } from '@/store/roomStore';
+import { useTransferStore } from '@/store/transferStore';
 
 export function useSignaling() {
   const navigate = useNavigate();
   const { setRoom, setPhase, setError, setIceServers, token, role } = useRoomStore();
+  const resetTransfer = useTransferStore((s) => s.reset);
 
   // ── 소켓 이벤트 등록 ────────────────────────────────────────
   useEffect(() => {
-    const onPeerJoined = () => setPhase('peer_connected');
-    const onPeerReconnected = () => setPhase('peer_connected');
+    const onPeerJoined = () => {
+      console.log('[Signal] peer-joined');
+      setPhase('peer_connected');
+    };
+    const onPeerReconnected = () => {
+      console.log('[Signal] peer-reconnected');
+      setPhase('peer_connected');
+    };
     const onPeerDisconnected = () => {
-      // peer_left 상태일 때는 덮어쓰지 않음 (의도적 나가기 vs 네트워크 끊김 구분)
+      console.log('[Signal] peer-disconnected');
       if (useRoomStore.getState().phase !== 'peer_left') setPhase('peer_disconnected');
     };
     const onPeerLeft = async () => {
+      console.log('[Signal] peer-left');
       const currentToken = useRoomStore.getState().token;
       if (currentToken) await deleteSession(currentToken);
       setPhase('peer_left');
@@ -38,11 +47,14 @@ export function useSignaling() {
 
   // ── 룸 생성 ─────────────────────────────────────────────────
   const createRoom = useCallback(async () => {
+    resetTransfer();
     setPhase('connecting');
     try {
       const servers = await fetchIceServers();
+      console.log('[Signal] ICE servers fetched:', servers.length);
       setIceServers(servers);
     } catch {
+      console.warn('[Signal] ICE fetch failed → using Google STUN fallback');
       setIceServers([{ urls: 'stun:stun.l.google.com:19302' }]);
     }
 
@@ -54,6 +66,7 @@ export function useSignaling() {
         return;
       }
       const { token: newToken, role: newRole, expiresAt } = result;
+      console.log('[Signal] room created, token:', newToken, 'role:', newRole);
       await saveSession({ token: newToken, role: newRole, expiresAt });
       setRoom(newToken, newRole, expiresAt);
       void navigate(`/r/${newToken}`);
@@ -63,11 +76,14 @@ export function useSignaling() {
   // ── 룸 참여 ─────────────────────────────────────────────────
   const joinRoom = useCallback(
     async (roomToken: string) => {
+      resetTransfer();
       setPhase('connecting');
       try {
         const servers = await fetchIceServers();
+        console.log('[Signal] ICE servers fetched:', servers.length);
         setIceServers(servers);
       } catch {
+        console.warn('[Signal] ICE fetch failed → using Google STUN fallback');
         setIceServers([{ urls: 'stun:stun.l.google.com:19302' }]);
       }
 
@@ -78,6 +94,7 @@ export function useSignaling() {
           setError(result.error);
           return;
         }
+        console.log('[Signal] room joined, token:', roomToken, 'role:', result.role);
         await saveSession({
           token: roomToken,
           role: result.role,
@@ -102,8 +119,10 @@ export function useSignaling() {
 
       try {
         const servers = await fetchIceServers();
+        console.log('[Signal] ICE servers fetched:', servers.length);
         setIceServers(servers);
       } catch {
+        console.warn('[Signal] ICE fetch failed → using Google STUN fallback');
         setIceServers([{ urls: 'stun:stun.l.google.com:19302' }]);
       }
 
@@ -111,10 +130,12 @@ export function useSignaling() {
 
       socket.emit('rejoin', { token: roomToken, role: session.role }, (result) => {
         if (!result.ok) {
+          console.warn('[Signal] rejoin failed, redirecting home');
           void deleteSession(roomToken);
           void navigate('/');
           return;
         }
+        console.log('[Signal] rejoined, token:', roomToken, 'role:', result.role, 'peerConnected:', result.peerConnected);
         setRoom(roomToken, result.role, result.expiresAt);
         void saveSession({ ...session, role: result.role, expiresAt: result.expiresAt });
         if (result.peerConnected) setPhase('peer_connected');
@@ -131,6 +152,7 @@ export function useSignaling() {
     }
     socket.disconnect();
     useRoomStore.getState().reset();
+    useTransferStore.getState().reset();
     void navigate('/');
   }, [navigate]);
 

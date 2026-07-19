@@ -76,13 +76,11 @@ export function useWebRTC({
     onChannelCloseRef.current?.(reason);
   }, []);
 
-  // useLayoutEffect: DOM commit 직후 같은 macrotask 내에서 실행되어
-  // socket.on('offer', ...) 등록이 offer 메시지 수신(다음 macrotask)보다 먼저 완료됨.
-  // useEffect는 paint 후 ~16ms 지연 → offer race condition 발생.
   useLayoutEffect(() => {
     if (!role || iceServers.length === 0) return;
     if (pcRef.current) return;
 
+    console.log('[WebRTC] creating PeerConnection, role:', role, 'iceServers:', iceServers.length);
     pcRef.current = new PeerConnection({
       iceServers,
       role,

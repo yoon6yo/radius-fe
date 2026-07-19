@@ -41,41 +41,54 @@ export class PeerConnection {
     this.pc = new RTCPeerConnection({ iceServers: options.iceServers });
     this.setupPeerConnectionListeners();
 
+    console.log('[WebRTC] PeerConnection created, role:', this.role);
     if (this.role === 'offerer') {
       this.channel = this.pc.createDataChannel('transfer', { ordered: true });
       this.channel.binaryType = 'arraybuffer';
+      console.log('[Channel] DataChannel created by offerer');
       this.setupChannelListeners(this.channel);
     } else {
       this.pc.ondatachannel = (event) => {
+        console.log('[Channel] DataChannel received by answerer, readyState:', event.channel.readyState);
         this.channel = event.channel;
         this.channel.binaryType = 'arraybuffer';
         this.setupChannelListeners(this.channel);
+        if (this.channel.readyState === 'open') {
+          console.log('[Channel] already open on ondatachannel, firing open manually');
+          this.onChannelOpen();
+        }
       };
     }
 
     // Arrow function으로 this를 캡처해 인스턴스별 독립 참조 생성
     this.handleOffer = async ({ sdp }: SdpPayload) => {
+      console.log('[SDP] offer received, setting remote desc');
       await this.pc.setRemoteDescription(sdp);
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
+      console.log('[SDP] answer created + sent');
       socket.emit('answer', { sdp: answer });
     };
 
     this.handleAnswer = async ({ sdp }: SdpPayload) => {
+      console.log('[SDP] answer received, setting remote desc');
       await this.pc.setRemoteDescription(sdp);
     };
 
     this.handleIceCandidate = async ({ candidate }: IceCandidatePayload) => {
+      console.log('[ICE] remote candidate received:', (candidate as RTCIceCandidateInit).candidate?.split(' ')[7]);
       await this.pc.addIceCandidate(candidate);
     };
 
     this.handlePeerJoined = async () => {
       if (this.role !== 'offerer') return;
+      console.log('[Signal] peer-joined → creating offer');
       await this.createAndSendOffer();
     };
 
     this.handlePeerReconnected = async () => {
       if (this.role !== 'offerer') return;
+      console.log('[Signal] peer-reconnected → creating offer');
       await this.createAndSendOffer();
     };
 
@@ -85,29 +98,56 @@ export class PeerConnection {
   private setupPeerConnectionListeners() {
     this.pc.onicecandidate = ({ candidate }) => {
       if (candidate) {
+        console.log('[ICE] local candidate:', candidate.type, candidate.protocol, candidate.address ?? '(hidden)');
         socket.emit('ice-candidate', { candidate: candidate.toJSON() });
+      } else {
+        console.log('[ICE] gathering complete');
       }
     };
 
+    this.pc.onicecandidateerror = (e) => {
+      console.warn('[ICE] candidate error:', (e as RTCPeerConnectionIceErrorEvent).errorCode, (e as RTCPeerConnectionIceErrorEvent).errorText);
+    };
+
     this.pc.onconnectionstatechange = () => {
+      console.log('[WebRTC] connection state:', this.pc.connectionState);
       this.onConnectionState(this.pc.connectionState);
     };
 
     this.pc.oniceconnectionstatechange = () => {
+      console.log('[ICE] connection state:', this.pc.iceConnectionState);
       if (
         this.pc.iceConnectionState === 'disconnected' ||
         this.pc.iceConnectionState === 'failed'
       ) {
+        console.warn('[ICE] restarting ICE');
         this.pc.restartIce();
       }
+    };
+
+    this.pc.onicegatheringstatechange = () => {
+      console.log('[ICE] gathering state:', this.pc.iceGatheringState);
+    };
+
+    this.pc.onsignalingstatechange = () => {
+      console.log('[SDP] signaling state:', this.pc.signalingState);
     };
   }
 
   private setupChannelListeners(ch: RTCDataChannel) {
-    ch.onopen = () => this.onChannelOpen();
+    ch.onopen = () => {
+      console.log('[Channel] opened, role:', this.role, 'label:', ch.label);
+      this.onChannelOpen();
+    };
     ch.onmessage = (event) => this.onMessage(event);
-    ch.onclose = () => this.onChannelClose?.('closed');
-    ch.onerror = () => this.onChannelClose?.('error');
+    ch.onclose = () => {
+      console.warn('[Channel] closed');
+      this.onChannelClose?.('closed');
+    };
+    ch.onerror = (e) => {
+      console.error('[Channel] error:', e);
+      this.onChannelClose?.('error');
+    };
   }
 
   private setupSignalingListeners() {
@@ -119,8 +159,10 @@ export class PeerConnection {
   }
 
   private async createAndSendOffer() {
+    console.log('[SDP] creating offer');
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
+    console.log('[SDP] offer created + sent');
     socket.emit('offer', { sdp: offer });
   }
 

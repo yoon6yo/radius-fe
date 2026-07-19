@@ -29,13 +29,14 @@ function formatEta(seconds: number): string {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  queued:        { label: '대기',       className: 'bg-gray-100 text-gray-500' },
-  hashing:       { label: '해싱 중',    className: 'bg-blue-50 text-blue-500' },
-  waiting_ready: { label: '응답 대기',  className: 'bg-blue-50 text-blue-500' },
-  transferring:  { label: '전송 중',    className: 'bg-blue-50 text-blue-600' },
-  verifying:     { label: '검증 중',    className: 'bg-blue-50 text-blue-500' },
-  done:          { label: '완료',       className: 'bg-green-50 text-green-600' },
-  error:         { label: '오류',       className: 'bg-red-50 text-red-500' },
+  queued:         { label: '대기',       className: 'bg-gray-100 text-gray-500' },
+  waiting_accept: { label: '수락 대기',  className: 'bg-amber-50 text-amber-600' },
+  hashing:        { label: '해싱 중',    className: 'bg-blue-50 text-blue-500' },
+  waiting_ready:  { label: '응답 대기',  className: 'bg-blue-50 text-blue-500' },
+  transferring:   { label: '전송 중',    className: 'bg-blue-50 text-blue-600' },
+  verifying:      { label: '검증 중',    className: 'bg-blue-50 text-blue-500' },
+  done:           { label: '완료',       className: 'bg-green-50 text-green-600' },
+  error:          { label: '오류',       className: 'bg-red-50 text-red-500' },
 };
 
 export function FileQueueItem({

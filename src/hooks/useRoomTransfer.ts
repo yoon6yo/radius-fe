@@ -8,7 +8,7 @@ import { useBitmapPersistence } from '@/hooks/useBitmapPersistence';
 import { useRoomStore } from '@/store/roomStore';
 import { useTransferStore } from '@/store/transferStore';
 import type { ChannelCloseHandler } from '@/lib/webrtc';
-import type { ControlMessage, ReadyMsg, ResumeMsg, VerifyOk, VerifyFail } from '@/types/transfer';
+import type { ControlMessage, ReadyMsg, ResumeMsg, VerifyOk, VerifyFail, TransferRequest } from '@/types/transfer';
 
 interface UseRoomTransferOptions {
   onChannelClose?: ChannelCloseHandler;
@@ -16,7 +16,7 @@ interface UseRoomTransferOptions {
 
 export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {}) {
   const { role, token } = useRoomStore();
-  const { queue, isLocked, updateFileStatus } = useTransferStore();
+  const { queue, isLocked, updateFileStatus, setPendingRequest, clearPendingRequest } = useTransferStore();
 
   const sendControlRef = useRef<(msg: ControlMessage) => void>(() => {});
   const getPcRef = useRef<() => import('@/lib/webrtc').PeerConnection | null>(() => null);
@@ -53,6 +53,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   const fileHashByFileId = useRef<Map<string, string>>(new Map());
   const hashReadyCountRef = useRef(0);
   const expectedHashCountRef = useRef(0);
+  const acceptedRef = useRef(false);
 
   const { computeHashes } = useSenderHash(
     (fileId, chunkHashes, fileHash) => {
@@ -62,8 +63,12 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
       fileHashByFileId.current.set(fileId, fileHash);
       hashReadyCountRef.current++;
       if (hashReadyCountRef.current >= expectedHashCountRef.current) {
-        console.log('[Transfer] all hashes ready → startSending');
-        void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
+        if (acceptedRef.current) {
+          console.log('[Transfer] all hashes ready + accepted → startSending');
+          void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
+        } else {
+          console.log('[Transfer] all hashes ready, waiting for TRANSFER_ACCEPT');
+        }
       }
     },
     (fileId) => {
@@ -72,28 +77,38 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     },
   );
 
-  // 큐가 잠기면(전송 시작) 해시 계산 시작 + 상태 'hashing'으로 표시
+  // 큐가 잠기면 TRANSFER_REQUEST 전송 + 백그라운드 해싱 시작
   useEffect(() => {
     if (!isLocked || role !== 'offerer') return;
     const currentQueue = queueRef.current;
     if (currentQueue.length === 0) return;
 
+    acceptedRef.current = false;
     chunkHashesByFileId.current.clear();
     fileHashByFileId.current.clear();
     hashReadyCountRef.current = 0;
     expectedHashCountRef.current = currentQueue.length;
 
+    const requestFiles = currentQueue.map((item) => ({
+      fileId: item.fileId,
+      fileName: item.file.name,
+      fileSize: item.file.size,
+    }));
+    console.log('[Transfer] sending TRANSFER_REQUEST:', requestFiles.length, 'files');
+    sendControlRef.current({ type: 'TRANSFER_REQUEST', files: requestFiles });
+
     for (const item of currentQueue) {
-      updateFileStatus(item.fileId, 'hashing');
+      updateFileStatus(item.fileId, 'waiting_accept');
       computeHashes(item.fileId, item.file);
     }
   // isLocked가 true로 바뀌는 시점에만 실행
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLocked]);
 
-  // 채널 재연결 시 중단된 전송 자동 재개 (채널 드롭으로 isAborted된 파일이 있을 때)
+  // 채널 재연결 시 중단된 전송 자동 재개
   const handleChannelOpen = useCallback(() => {
     if (!isLockedRef.current || role !== 'offerer') return;
+    if (!acceptedRef.current) return;
     const hasWaiting = queueRef.current.some((f) => f.status === 'waiting_ready');
     if (hasWaiting && chunkHashesByFileId.current.size > 0) {
       void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
@@ -104,6 +119,11 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   const onControlMessage = useCallback(
     (msg: ControlMessage) => {
       if (role === 'answerer') {
+        if (msg.type === 'TRANSFER_REQUEST') {
+          console.log('[Transfer:answerer] TRANSFER_REQUEST received:', (msg as TransferRequest).files.length, 'files');
+          setPendingRequest((msg as TransferRequest).files);
+          return;
+        }
         void (async () => {
           try {
             if (msg.type === 'FILE_META') {
@@ -119,8 +139,6 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
                 chunkHashes: [],
               });
             }
-            // HASH_DONE: 해시 먼저 등록 → READY/RESUME 전송
-            // (순서가 반대면 READY 후 도착한 초반 청크가 검증 없이 통과됨)
             if (msg.type === 'HASH_DONE') {
               console.log('[Transfer:answerer] HASH_DONE received:', msg.fileId, 'hashes:', getChunkHashes().length);
               setChunkHashes(msg.fileId, getChunkHashes());
@@ -131,6 +149,19 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
           }
         })();
       } else {
+        if (msg.type === 'TRANSFER_ACCEPT') {
+          console.log('[Transfer:offerer] TRANSFER_ACCEPT received → starting transfer');
+          acceptedRef.current = true;
+          if (hashReadyCountRef.current >= expectedHashCountRef.current && expectedHashCountRef.current > 0) {
+            void startSendingRef.current(chunkHashesByFileId.current, fileHashByFileId.current);
+          }
+        }
+        if (msg.type === 'TRANSFER_REJECT') {
+          console.log('[Transfer:offerer] TRANSFER_REJECT received');
+          for (const item of queueRef.current) {
+            updateFileStatus(item.fileId, 'error');
+          }
+        }
         if (msg.type === 'READY' || msg.type === 'RESUME') {
           console.log('[Transfer:offerer] received', msg.type, 'for:', (msg as ReadyMsg | ResumeMsg).fileId);
           resolveReady(msg as ReadyMsg | ResumeMsg);
@@ -141,7 +172,7 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
       }
     },
     [role, token, handleControl, setChunkHashes, getChunkHashes, resolveReady, resolveVerify,
-     initTransferRecord, updateFileStatus],
+     initTransferRecord, updateFileStatus, setPendingRequest],
   );
 
   const onBinaryChunk = useCallback(
@@ -159,5 +190,17 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   sendControlRef.current = webRTC.sendControl;
   getPcRef.current = webRTC.getPeerConnection;
 
-  return { ...webRTC, abortCurrent };
+  const acceptTransfer = useCallback(() => {
+    console.log('[Transfer:answerer] accepting transfer');
+    clearPendingRequest();
+    sendControlRef.current({ type: 'TRANSFER_ACCEPT' });
+  }, [clearPendingRequest]);
+
+  const rejectTransfer = useCallback(() => {
+    console.log('[Transfer:answerer] rejecting transfer');
+    clearPendingRequest();
+    sendControlRef.current({ type: 'TRANSFER_REJECT' });
+  }, [clearPendingRequest]);
+
+  return { ...webRTC, abortCurrent, acceptTransfer, rejectTransfer };
 }

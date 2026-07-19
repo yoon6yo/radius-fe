@@ -40,7 +40,7 @@ export default function Room() {
     [isLocked],
   );
 
-  const { channelReady, isRelayed, abortCurrent } = useRoomTransfer({ onChannelClose: handleChannelClose });
+  const { channelReady, isRelayed, abortCurrent, acceptTransfer, rejectTransfer } = useRoomTransfer({ onChannelClose: handleChannelClose });
   const { lockQueue } = useTransferStore();
 
   const handleLeaveRoom = useCallback(async () => {
@@ -222,7 +222,12 @@ export default function Room() {
         {/* 전송 패널 */}
         {(isConnected || isDisconnected) && role && (
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-            <TransferPanel role={role} onStartTransfer={handleStartTransfer} />
+            <TransferPanel
+              role={role}
+              onStartTransfer={handleStartTransfer}
+              onAccept={acceptTransfer}
+              onReject={rejectTransfer}
+            />
           </div>
         )}
       </div>

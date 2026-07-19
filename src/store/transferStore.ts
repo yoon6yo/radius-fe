@@ -1,10 +1,17 @@
 import { create } from 'zustand';
 import type { QueuedFile, TransferStatus } from '@/types/transfer';
 
+export interface PendingFileInfo {
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+}
+
 interface TransferState {
   queue: QueuedFile[];
   currentIndex: number;
   isLocked: boolean;
+  pendingRequest: PendingFileInfo[] | null;
 
   addFiles: (files: File[]) => void;
   removeFile: (fileId: string) => void;
@@ -15,6 +22,8 @@ interface TransferState {
     delta: { totalChunks?: number; sentChunks?: number; receivedChunks?: number; speedBps?: number; etaSeconds?: number }
   ) => void;
   advanceQueue: () => void;
+  setPendingRequest: (files: PendingFileInfo[]) => void;
+  clearPendingRequest: () => void;
   reset: () => void;
 }
 
@@ -26,6 +35,7 @@ export const useTransferStore = create<TransferState>((set) => ({
   queue: [],
   currentIndex: 0,
   isLocked: false,
+  pendingRequest: null,
 
   addFiles: (files) =>
     set((s) => {
@@ -65,5 +75,8 @@ export const useTransferStore = create<TransferState>((set) => ({
 
   advanceQueue: () => set((s) => ({ currentIndex: s.currentIndex + 1 })),
 
-  reset: () => set({ queue: [], currentIndex: 0, isLocked: false }),
+  setPendingRequest: (files) => set({ pendingRequest: files }),
+  clearPendingRequest: () => set({ pendingRequest: null }),
+
+  reset: () => set({ queue: [], currentIndex: 0, isLocked: false, pendingRequest: null }),
 }));

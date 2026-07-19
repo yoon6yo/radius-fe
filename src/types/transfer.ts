@@ -50,8 +50,21 @@ export interface VerifyFail {
   reason: 'file_hash_mismatch';
 }
 
-export type SenderMessage = FileMeta | HashPart | HashDone | TransferDone;
-export type ReceiverMessage = ReadyMsg | ResumeMsg | VerifyOk | VerifyFail;
+export interface TransferRequest {
+  type: 'TRANSFER_REQUEST';
+  files: Array<{ fileId: string; fileName: string; fileSize: number }>;
+}
+
+export interface TransferAccept {
+  type: 'TRANSFER_ACCEPT';
+}
+
+export interface TransferReject {
+  type: 'TRANSFER_REJECT';
+}
+
+export type SenderMessage = FileMeta | HashPart | HashDone | TransferDone | TransferRequest;
+export type ReceiverMessage = ReadyMsg | ResumeMsg | VerifyOk | VerifyFail | TransferAccept | TransferReject;
 export type ControlMessage = SenderMessage | ReceiverMessage;
 
 // IndexedDB 스키마
@@ -77,6 +90,7 @@ export interface TransferRecord {
 // 전송 큐 항목 (Zustand 상태용)
 export type TransferStatus =
   | 'queued'
+  | 'waiting_accept'
   | 'hashing'
   | 'waiting_ready'
   | 'transferring'

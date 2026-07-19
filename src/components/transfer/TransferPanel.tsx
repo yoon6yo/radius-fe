@@ -2,15 +2,18 @@ import { useCallback } from 'react';
 import { FileDropZone } from './FileDropZone';
 import { FileQueueItem } from './FileQueueItem';
 import { TransferComplete } from './TransferComplete';
+import { TransferRequestPanel } from './TransferRequestPanel';
 import { useTransferStore } from '@/store/transferStore';
 
 interface TransferPanelProps {
   onStartTransfer: () => void;
   role: 'offerer' | 'answerer';
+  onAccept?: () => void;
+  onReject?: () => void;
 }
 
-export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
-  const { queue, currentIndex, isLocked, addFiles, removeFile, reset } = useTransferStore();
+export function TransferPanel({ onStartTransfer, role, onAccept, onReject }: TransferPanelProps) {
+  const { queue, currentIndex, isLocked, addFiles, removeFile, reset, pendingRequest } = useTransferStore();
 
   const handleFiles = useCallback(
     (files: File[]) => {
@@ -26,6 +29,16 @@ export function TransferPanel({ onStartTransfer, role }: TransferPanelProps) {
 
   if (isAllDone) {
     return <TransferComplete totalFiles={queue.length} onReset={reset} />;
+  }
+
+  if (role === 'answerer' && pendingRequest && pendingRequest.length > 0) {
+    return (
+      <TransferRequestPanel
+        files={pendingRequest}
+        onAccept={onAccept ?? (() => {})}
+        onReject={onReject ?? (() => {})}
+      />
+    );
   }
 
   return (
