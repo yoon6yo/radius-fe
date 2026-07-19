@@ -10,3 +10,7 @@ export const TOKEN_PATTERN = /^\d{6}$/;
 // 최소 대기시간 + 예상 최소 처리량 기준으로 파일 크기에 비례하게 늘어나도록 계산한다.
 export const VERIFY_TIMEOUT_MIN_MS       =    30_000; // 최소 대기 (30초)
 export const VERIFY_ASSUMED_MIN_BPS      = 2 * 1024 * 1024; // 최소 예상 처리량 2MB/s
+
+// FILE_META는 신뢰할 수 없는 상대 피어가 보낸 값이므로 받는 즉시 신뢰하지 않고 검증한다.
+export const MAX_FILE_NAME_LENGTH = 255;
+export const MAX_FILE_SIZE = 1024 ** 4; // 1TB — 이보다 큰 선언값은 명백히 조작된 값으로 간주

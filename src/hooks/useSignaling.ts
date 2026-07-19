@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { socket } from '@/lib/socket';
 import { fetchIceServers } from '@/lib/iceConfig';
 import { saveSession, getActiveSession, deleteSession } from '@/lib/indexeddb';
+import { canAttemptJoin, recordJoinFailure, recordJoinSuccess } from '@/lib/joinAttemptGuard';
+import { cleanupAbandonedTransfersForToken } from '@/lib/transferCleanup';
 import { useRoomStore } from '@/store/roomStore';
 import { useTransferStore } from '@/store/transferStore';
 
@@ -28,7 +30,11 @@ export function useSignaling() {
     const onPeerLeft = async () => {
       console.log('[Signal] peer-left');
       const currentToken = useRoomStore.getState().token;
-      if (currentToken) await deleteSession(currentToken);
+      if (currentToken) {
+        await deleteSession(currentToken);
+        // 상대가 완전히 나갔으니 다시 이어받을 수 없음 — 남아있던 OPFS 파일/기록 정리
+        void cleanupAbandonedTransfersForToken(currentToken);
+      }
       setPhase('peer_left');
     };
 
@@ -75,7 +81,14 @@ export function useSignaling() {
 
   // ── 룸 참여 ─────────────────────────────────────────────────
   const joinRoom = useCallback(
-    async (roomToken: string) => {
+    async (roomToken: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      // PIN 무작위 대입 저지선 (UX 수준 — 실제 방어는 서버 rate-limit이 담당)
+      const guard = canAttemptJoin();
+      if (!guard.allowed) {
+        const seconds = Math.ceil(guard.retryAfterMs / 1000);
+        return { ok: false, error: `너무 많이 시도했습니다. ${seconds}초 후 다시 시도해주세요.` };
+      }
+
       resetTransfer();
       setPhase('connecting');
       try {
@@ -89,19 +102,25 @@ export function useSignaling() {
 
       if (!socket.connected) socket.connect();
 
-      socket.emit('join-room', roomToken, async (result) => {
-        if (!result.ok) {
-          setError(result.error);
-          return;
-        }
-        console.log('[Signal] room joined, token:', roomToken, 'role:', result.role);
-        await saveSession({
-          token: roomToken,
-          role: result.role,
-          expiresAt: result.expiresAt,
+      return new Promise((resolve) => {
+        socket.emit('join-room', roomToken, async (result) => {
+          if (!result.ok) {
+            recordJoinFailure();
+            setError(result.error);
+            resolve({ ok: false, error: result.error });
+            return;
+          }
+          recordJoinSuccess();
+          console.log('[Signal] room joined, token:', roomToken, 'role:', result.role);
+          await saveSession({
+            token: roomToken,
+            role: result.role,
+            expiresAt: result.expiresAt,
+          });
+          setRoom(roomToken, result.role, result.expiresAt);
+          void navigate(`/r/${roomToken}`);
+          resolve({ ok: true });
         });
-        setRoom(roomToken, result.role, result.expiresAt);
-        void navigate(`/r/${roomToken}`);
       });
     },
     [navigate, setError, setIceServers, setPhase, setRoom],
@@ -132,6 +151,7 @@ export function useSignaling() {
         if (!result.ok) {
           console.warn('[Signal] rejoin failed, redirecting home');
           void deleteSession(roomToken);
+          void cleanupAbandonedTransfersForToken(roomToken);
           void navigate('/');
           return;
         }
@@ -149,6 +169,8 @@ export function useSignaling() {
     if (currentToken) {
       socket.emit('leave-room');
       await deleteSession(currentToken);
+      // 세션을 지웠으니 이 토큰의 pending 전송은 다시는 이어받을 수 없음 — 정리
+      void cleanupAbandonedTransfersForToken(currentToken);
     }
     socket.disconnect();
     useRoomStore.getState().reset();

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { CHUNK_SIZE } from '@/constants/transfer';
+import { isValidFileMeta } from '@/lib/chunkUtils';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useFileTransfer } from '@/hooks/useFileTransfer';
 import { useFileReceiver } from '@/hooks/useFileReceiver';
@@ -153,6 +154,12 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
         if (msg.type === 'TRANSFER_REQUEST') {
           console.log('[Transfer:answerer] TRANSFER_REQUEST received:', (msg as TransferRequest).files.length, 'files');
           setPendingRequest((msg as TransferRequest).files);
+          return;
+        }
+        // FILE_META는 신뢰할 수 없는 상대가 보낸 값 — addReceivedFile/initTransferRecord
+        // 같은 부작용을 일으키기 전에 검증해서 조작된 크기/청크 수 조합을 아예 큐에 넣지 않는다.
+        if (msg.type === 'FILE_META' && !isValidFileMeta(msg)) {
+          console.warn('[Transfer:answerer] rejecting invalid FILE_META:', msg);
           return;
         }
         controlQueueRef.current = controlQueueRef.current.then(async () => {

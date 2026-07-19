@@ -27,7 +27,10 @@ export default function Home() {
       }
       setPinError('');
       setIsLoading(true);
-      await joinRoom(normalized);
+      const result = await joinRoom(normalized);
+      if (!result.ok) {
+        setPinError(result.error);
+      }
       setIsLoading(false);
     },
     [joinRoom, pin],

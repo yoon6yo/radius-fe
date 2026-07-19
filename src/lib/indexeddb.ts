@@ -197,3 +197,22 @@ export async function getPendingTransfersByToken(
     req.onerror = () => reject(req.error);
   });
 }
+
+// 고아 레코드 정리(startup sweep)에 필요 — 토큰 구분 없이 전체 레코드를 훑는다.
+export async function getAllTransfers(): Promise<TransferRecord[]> {
+  const database = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = tx(database, 'transfers', 'readonly').getAll();
+    req.onsuccess = () => resolve(req.result as TransferRecord[]);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function deleteTransferRecord(fileId: string): Promise<void> {
+  const database = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = tx(database, 'transfers', 'readwrite').delete(fileId);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}

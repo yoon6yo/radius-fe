@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { OPFSFileWriter, exportFromOPFS, deleteFromOPFS } from '@/lib/fileWriter';
-import { parseChunk } from '@/lib/chunkUtils';
+import { parseChunk, isValidFileMeta } from '@/lib/chunkUtils';
 import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
 import type { FileWriter } from '@/lib/fileWriter';
 import type {
@@ -62,6 +62,11 @@ export function useFileReceiver({
   const handleControl = useCallback(
     async (msg: ControlMessage) => {
       if (msg.type === 'FILE_META') {
+        // 상대 피어가 보낸 값이므로 사용 전 검증 — 조작된 크기/청크 수 조합을 거부한다.
+        if (!isValidFileMeta(msg)) {
+          console.warn('[Receiver] rejecting invalid FILE_META:', msg);
+          return;
+        }
         console.log('[Receiver] FILE_META:', msg.fileId, msg.fileName);
         chunkHashesRef.current = [];
         fileHashRef.current = '';
@@ -122,6 +127,14 @@ export function useFileReceiver({
     (buffer: ArrayBuffer): void => {
       chunkQueueRef.current = chunkQueueRef.current.then(async () => {
         const { chunkIndex, data } = parseChunk(buffer);
+
+        // 상대는 신뢰할 수 없는 피어 — chunkIndex를 조작해 OPFS에 임의로 큰 오프셋을
+        // 쓰게 만들 수 있으므로(스토리지 소진 DoS) 실제 쓰기 전에 범위를 검증한다.
+        const totalChunks = metaRef.current?.totalChunks ?? 0;
+        if (chunkIndex >= totalChunks || data.byteLength > CHUNK_SIZE) {
+          console.warn('[Receiver] rejecting out-of-range chunk:', chunkIndex, '/', totalChunks);
+          return;
+        }
 
         if (receivedBitmap.current.has(chunkIndex)) return;
 

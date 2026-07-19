@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildChunk, parseChunk, calcTotalChunks } from '@/lib/chunkUtils';
-import { CHUNK_SIZE } from '@/constants/transfer';
+import { buildChunk, parseChunk, calcTotalChunks, sanitizeFileName, isValidFileMeta } from '@/lib/chunkUtils';
+import { CHUNK_SIZE, MAX_FILE_NAME_LENGTH } from '@/constants/transfer';
+import type { FileMeta } from '@/types/transfer';
 
 describe('buildChunk / parseChunk', () => {
   it('roundtrip: index와 data가 복원된다', () => {
@@ -76,5 +77,89 @@ describe('calcTotalChunks', () => {
 
   it('커스텀 chunkSize 파라미터 지원', () => {
     expect(calcTotalChunks(10, 3)).toBe(4); // ceil(10/3)
+  });
+});
+
+describe('sanitizeFileName', () => {
+  it('평범한 파일명은 그대로 유지된다', () => {
+    expect(sanitizeFileName('report.pdf')).toBe('report.pdf');
+    expect(sanitizeFileName('사진 2024.zip')).toBe('사진 2024.zip');
+  });
+
+  it('C0 제어문자를 제거한다', () => {
+    const withControl = 'evil' + String.fromCharCode(0x0001) + '.txt';
+    expect(sanitizeFileName(withControl)).toBe('evil.txt');
+  });
+
+  it('DEL(0x7F)을 제거한다', () => {
+    const withDel = 'a' + String.fromCharCode(0x007f) + 'b.txt';
+    expect(sanitizeFileName(withDel)).toBe('ab.txt');
+  });
+
+  it('RTL override(U+202E) 등 방향성 제어문자를 제거한다 — 확장자 위장 방지', () => {
+    // "invoice" + RLO + "fdp.exe" 처럼 보이도록 조작된 이름에서 RLO를 제거하면
+    // 시각적 위장 없이 실제 문자만 남는다.
+    const spoofed = 'invoice' + String.fromCharCode(0x202e) + 'fdp.exe';
+    const result = sanitizeFileName(spoofed);
+    expect(result).not.toContain(String.fromCharCode(0x202e));
+    expect(result).toBe('invoicefdp.exe');
+  });
+
+  it('LRM/RLM/LRI 등 다른 bidi 제어문자도 제거한다', () => {
+    const chars = [0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x2066, 0x2067, 0x2068, 0x2069];
+    for (const code of chars) {
+      const name = 'a' + String.fromCharCode(code) + 'b';
+      expect(sanitizeFileName(name)).toBe('ab');
+    }
+  });
+
+  it('제거 후 빈 문자열이면 fallback 이름을 사용한다', () => {
+    const onlyControl = String.fromCharCode(0x0001) + String.fromCharCode(0x0002);
+    expect(sanitizeFileName(onlyControl)).toBe('file');
+  });
+
+  it('앞뒤 공백을 trim한다', () => {
+    expect(sanitizeFileName('  spaced.txt  ')).toBe('spaced.txt');
+  });
+});
+
+describe('isValidFileMeta', () => {
+  const base: FileMeta = {
+    type: 'FILE_META',
+    fileId: 'f1',
+    fileName: 'test.bin',
+    fileSize: CHUNK_SIZE * 2,
+    chunkSize: CHUNK_SIZE,
+    totalChunks: 2,
+    totalHashParts: 1,
+  };
+
+  it('정상적인 메타데이터는 통과한다', () => {
+    expect(isValidFileMeta(base)).toBe(true);
+  });
+
+  it('빈 파일명은 거부한다', () => {
+    expect(isValidFileMeta({ ...base, fileName: '' })).toBe(false);
+  });
+
+  it('너무 긴 파일명은 거부한다', () => {
+    expect(isValidFileMeta({ ...base, fileName: 'a'.repeat(MAX_FILE_NAME_LENGTH + 1) })).toBe(false);
+  });
+
+  it('음수/무한대 fileSize는 거부한다', () => {
+    expect(isValidFileMeta({ ...base, fileSize: -1 })).toBe(false);
+    expect(isValidFileMeta({ ...base, fileSize: Infinity })).toBe(false);
+  });
+
+  it('chunkSize가 프로토콜 상수와 다르면 거부한다', () => {
+    expect(isValidFileMeta({ ...base, chunkSize: 1024 })).toBe(false);
+  });
+
+  it('totalChunks가 fileSize/chunkSize와 안 맞으면 거부한다 (조작 방지)', () => {
+    expect(isValidFileMeta({ ...base, totalChunks: 999 })).toBe(false);
+  });
+
+  it('totalChunks가 정수가 아니면 거부한다', () => {
+    expect(isValidFileMeta({ ...base, totalChunks: 2.5 })).toBe(false);
   });
 });

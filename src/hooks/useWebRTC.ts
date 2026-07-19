@@ -1,6 +1,7 @@
 import { useLayoutEffect, useEffect, useRef, useCallback, useState } from 'react';
 import { PeerConnection } from '@/lib/webrtc';
 import { consumeBufferedOffer } from '@/lib/socket';
+import { sanitizeFileName } from '@/lib/chunkUtils';
 import { useRoomStore } from '@/store/roomStore';
 import type { ChannelCloseHandler } from '@/lib/webrtc';
 import type { ControlMessage } from '@/types/transfer';
@@ -43,6 +44,11 @@ export function useWebRTC({
     if (typeof event.data === 'string') {
       try {
         const msg = JSON.parse(event.data) as ControlMessage;
+        // FILE_META의 fileName은 신뢰할 수 없는 상대가 보낸 값 — 위험한 방향성 제어문자를
+        // 파싱 시점에 한 번만 정제해서 표시/저장/다운로드 전 구간이 항상 같은 이름을 보게 함
+        if (msg.type === 'FILE_META') {
+          msg.fileName = sanitizeFileName(msg.fileName);
+        }
         onControlMessageRef.current?.(msg);
       } catch {
         console.warn('[WebRTC] JSON parse error', event.data);
