@@ -17,7 +17,7 @@ interface UseRoomTransferOptions {
 
 export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {}) {
   const { role, token } = useRoomStore();
-  const { queue, isLocked, updateFileStatus, updateProgress, advanceQueue, setPendingRequest, clearPendingRequest, addReceivedFile } = useTransferStore();
+  const { queue, isLocked, updateFileStatus, updateProgress, advanceQueue, setPendingRequest, clearPendingRequest, acceptPendingRequest, addReceivedFile } = useTransferStore();
 
   const sendControlRef = useRef<(msg: ControlMessage) => void>(() => {});
   const getPcRef = useRef<() => import('@/lib/webrtc').PeerConnection | null>(() => null);
@@ -224,9 +224,9 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
 
   const acceptTransfer = useCallback(() => {
     console.log('[Transfer:answerer] accepting transfer');
-    clearPendingRequest();
+    acceptPendingRequest();
     sendControlRef.current({ type: 'TRANSFER_ACCEPT' });
-  }, [clearPendingRequest]);
+  }, [acceptPendingRequest]);
 
   const rejectTransfer = useCallback(() => {
     console.log('[Transfer:answerer] rejecting transfer');

@@ -3,6 +3,7 @@ import { FileDropZone } from './FileDropZone';
 import { FileQueueItem } from './FileQueueItem';
 import { TransferComplete } from './TransferComplete';
 import { TransferRequestPanel } from './TransferRequestPanel';
+import { TransferPreparingPanel } from './TransferPreparingPanel';
 import { useTransferStore } from '@/store/transferStore';
 
 interface TransferPanelProps {
@@ -13,7 +14,7 @@ interface TransferPanelProps {
 }
 
 export function TransferPanel({ onStartTransfer, role, onAccept, onReject }: TransferPanelProps) {
-  const { queue, currentIndex, isLocked, addFiles, removeFile, reset, pendingRequest } = useTransferStore();
+  const { queue, currentIndex, isLocked, addFiles, removeFile, reset, pendingRequest, acceptedRequest } = useTransferStore();
 
   const handleFiles = useCallback(
     (files: File[]) => {
@@ -39,6 +40,11 @@ export function TransferPanel({ onStartTransfer, role, onAccept, onReject }: Tra
         onReject={onReject ?? (() => {})}
       />
     );
+  }
+
+  // 수락은 눌렀지만 아직 첫 파일 메타데이터를 못 받은 구간 (송신 측 해싱 대기)
+  if (role === 'answerer' && acceptedRequest && acceptedRequest.length > 0 && queue.length === 0) {
+    return <TransferPreparingPanel files={acceptedRequest} />;
   }
 
   return (

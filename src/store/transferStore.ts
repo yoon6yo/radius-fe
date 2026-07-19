@@ -12,6 +12,9 @@ interface TransferState {
   currentIndex: number;
   isLocked: boolean;
   pendingRequest: PendingFileInfo[] | null;
+  // 수락은 눌렀지만 아직 첫 FILE_META를 못 받은 구간(송신 측 해싱 대기)에 보여줄 정보.
+  // 이게 없으면 이 구간이 "아무 요청도 없는 대기 상태"와 화면상 구분이 안 됨.
+  acceptedRequest: PendingFileInfo[] | null;
 
   addFiles: (files: File[]) => void;
   addReceivedFile: (fileId: string, fileName: string, fileSize: number, totalChunks: number) => void;
@@ -25,6 +28,7 @@ interface TransferState {
   advanceQueue: () => void;
   setPendingRequest: (files: PendingFileInfo[]) => void;
   clearPendingRequest: () => void;
+  acceptPendingRequest: () => void;
   reset: () => void;
 }
 
@@ -37,6 +41,7 @@ export const useTransferStore = create<TransferState>((set) => ({
   currentIndex: 0,
   isLocked: false,
   pendingRequest: null,
+  acceptedRequest: null,
 
   addFiles: (files) =>
     set((s) => {
@@ -74,6 +79,8 @@ export const useTransferStore = create<TransferState>((set) => ({
         },
       ],
       isLocked: true,
+      // 실제 데이터가 도착했으니 "준비 중" 화면은 더 이상 필요 없음
+      acceptedRequest: null,
     })),
 
   removeFile: (fileId) =>
@@ -100,6 +107,10 @@ export const useTransferStore = create<TransferState>((set) => ({
 
   setPendingRequest: (files) => set({ pendingRequest: files }),
   clearPendingRequest: () => set({ pendingRequest: null }),
+  // 수락 버튼을 누른 시점 — pendingRequest를 그냥 버리지 않고 acceptedRequest로 옮겨서
+  // 첫 FILE_META가 올 때까지의 공백 구간에도 어떤 파일을 기다리는지 계속 보여줄 수 있게 함
+  acceptPendingRequest: () =>
+    set((s) => ({ pendingRequest: null, acceptedRequest: s.pendingRequest })),
 
-  reset: () => set({ queue: [], currentIndex: 0, isLocked: false, pendingRequest: null }),
+  reset: () => set({ queue: [], currentIndex: 0, isLocked: false, pendingRequest: null, acceptedRequest: null }),
 }));
