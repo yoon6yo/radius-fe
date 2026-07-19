@@ -1,4 +1,4 @@
-import { socket } from '@/lib/socket';
+import { socket, clearBufferedOffer } from '@/lib/socket';
 import type { SdpPayload, IceCandidatePayload } from '@/types/signaling';
 
 export type DataChannelMessageHandler = (event: MessageEvent) => void;
@@ -62,6 +62,7 @@ export class PeerConnection {
 
     // Arrow function으로 this를 캡처해 인스턴스별 독립 참조 생성
     this.handleOffer = async ({ sdp }: SdpPayload) => {
+      clearBufferedOffer(); // 버퍼 클리어 (PeerConnection이 직접 처리하므로 replay 불필요)
       console.log('[SDP] offer received, setting remote desc');
       await this.pc.setRemoteDescription(sdp);
       const answer = await this.pc.createAnswer();
@@ -168,7 +169,11 @@ export class PeerConnection {
 
   // ── Public API ───────────────────────────────────────────
 
-  // offerer가 재연결할 때 peer가 이미 연결된 경우 직접 호출 (Bug 1)
+  replayOffer(payload: SdpPayload): void {
+    console.log('[WebRTC] replaying buffered offer');
+    void this.handleOffer(payload);
+  }
+
   triggerOffer(): void {
     if (this.role !== 'offerer') return;
     void this.createAndSendOffer();

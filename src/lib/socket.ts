@@ -1,10 +1,26 @@
 import { io, Socket } from 'socket.io-client';
-import type { ServerToClientEvents, ClientToServerEvents } from '@/types/signaling';
+import type { ServerToClientEvents, ClientToServerEvents, SdpPayload } from '@/types/signaling';
 
-// VITE_SIGNALING_URL 미설정 시 현재 origin 사용 (Vite proxy 또는 nginx 경유)
 const signalingUrl = (import.meta.env.VITE_SIGNALING_URL as string) || undefined;
 
 export const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(
   signalingUrl,
   { transports: ['polling', 'websocket'], autoConnect: false },
 );
+
+// Offer가 PeerConnection 생성 전에 도착하는 race condition 대비 — 모듈 로드 시점에 등록
+let _pendingOffer: SdpPayload | null = null;
+socket.on('offer', (data) => {
+  _pendingOffer = data;
+  console.log('[Socket] offer captured in buffer');
+});
+
+export function consumeBufferedOffer(): SdpPayload | null {
+  const offer = _pendingOffer;
+  _pendingOffer = null;
+  return offer;
+}
+
+export function clearBufferedOffer() {
+  _pendingOffer = null;
+}

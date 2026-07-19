@@ -1,5 +1,6 @@
 import { useLayoutEffect, useEffect, useRef, useCallback, useState } from 'react';
 import { PeerConnection } from '@/lib/webrtc';
+import { consumeBufferedOffer } from '@/lib/socket';
 import { useRoomStore } from '@/store/roomStore';
 import type { ChannelCloseHandler } from '@/lib/webrtc';
 import type { ControlMessage } from '@/types/transfer';
@@ -92,6 +93,12 @@ export function useWebRTC({
 
     if (role === 'offerer' && useRoomStore.getState().phase === 'peer_connected') {
       pcRef.current.triggerOffer();
+    }
+
+    // PeerConnection 생성 전에 도착한 offer가 있으면 재생
+    const pending = consumeBufferedOffer();
+    if (pending) {
+      pcRef.current.replayOffer(pending);
     }
 
     return () => {
