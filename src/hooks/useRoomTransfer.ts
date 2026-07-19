@@ -120,15 +120,15 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
 
     const requestFiles = currentQueue.map((item) => ({
       fileId: item.fileId,
-      fileName: item.file.name,
-      fileSize: item.file.size,
+      fileName: item.fileName,
+      fileSize: item.fileSize,
     }));
     console.log('[Transfer] sending TRANSFER_REQUEST:', requestFiles.length, 'files');
     sendControlRef.current({ type: 'TRANSFER_REQUEST', files: requestFiles });
 
     for (const item of currentQueue) {
       updateFileStatus(item.fileId, 'waiting_accept');
-      computeHashes(item.fileId, item.file);
+      computeHashes(item.fileId, item.file!);
     }
   // isLocked가 true로 바뀌는 시점에만 실행
   // eslint-disable-next-line react-hooks/exhaustive-deps
