@@ -164,7 +164,11 @@ export function useSignaling() {
     [navigate, setIceServers, setPhase, setRoom],
   );
 
-  const leaveRoom = useCallback(async () => {
+  // navigate 없이 소켓 연결 해제 + 세션 삭제 + 스토어 초기화만 한다. 이미 다른 경로로
+  // 라우트가 바뀐 뒤(예: 컴포넌트 언마운트 시점의 정리)에 호출될 수 있어서, 여기서
+  // 또 navigate('/')를 부르면 사용자가 뒤로가기로 다른 곳에 도착했는데 홈으로 다시
+  // 끌려가는 상황이 생길 수 있다 — 그래서 navigate는 leaveRoom에서만 명시적으로 한다.
+  const leaveRoomSilently = useCallback(async () => {
     const currentToken = useRoomStore.getState().token;
     if (currentToken) {
       socket.emit('leave-room');
@@ -175,8 +179,12 @@ export function useSignaling() {
     socket.disconnect();
     useRoomStore.getState().reset();
     useTransferStore.getState().reset();
-    void navigate('/');
-  }, [navigate]);
+  }, []);
 
-  return { createRoom, joinRoom, rejoinByToken, leaveRoom, token, role };
+  const leaveRoom = useCallback(async () => {
+    await leaveRoomSilently();
+    void navigate('/');
+  }, [navigate, leaveRoomSilently]);
+
+  return { createRoom, joinRoom, rejoinByToken, leaveRoom, leaveRoomSilently, token, role };
 }

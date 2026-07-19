@@ -14,6 +14,13 @@ const FILE_READ_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
 // 쓴다 (132MB 기준 벤치마크: 순수 JS SHA-256 스트리밍 823ms → FNV-1a 132ms, 네이티브보다도 빠름).
 const LARGE_FILE_STREAM_THRESHOLD = 256 * 1024 * 1024; // 256MB
 
+// HASH_CHUNKS도 청크(64KB) 단위로 파일을 하나씩 개별적으로 읽으면, 대용량 파일에서
+// 비동기 read 호출이 수만~수십만 번 필요해 그 자체가 누적 지연이 된다(10GB면 16만 회+).
+// 훨씬 큰 블록 단위로 한 번에 읽어 메모리에 올린 뒤, 그 안에서 청크별로 슬라이스해
+// 해시만 계산한다 — 프로토콜상의 청크 경계·해시 결과는 그대로고 파일 read 호출
+// 횟수만 줄어든다(4MB 블록이면 64분의 1).
+const HASH_READ_BLOCK_SIZE = 4 * 1024 * 1024; // 4MB
+
 export type HashWorkerRequest =
   | { type: 'HASH_CHUNKS'; fileId: string; file: File; chunkSize: number }
   | { type: 'HASH_BUFFER'; fileId: string; buffer: ArrayBuffer; chunkIndex: number }
@@ -67,12 +74,30 @@ self.onmessage = async (event: MessageEvent<HashWorkerRequest>) => {
       // 청크별 진행 메시지를 매번 postMessage로 쏘지 않는다 — 아무도 구독하지 않는데
       // 대용량 파일(수십만 청크)에서는 이 IPC 왕복 자체가 해싱 전체 시간에 누적돼
       // 체감될 정도로 느려짐. 최종 결과(CHUNKS_DONE)만 한 번 보낸다.
+      //
+      // 파일도 청크 하나씩(64KB) 개별 read하지 않고, HASH_READ_BLOCK_SIZE 단위로
+      // 크게 읽어서 메모리 안 블록에서 청크별로 슬라이스만 한다 — read 호출 횟수를
+      // 크게 줄인다. 청크 해시 결과 자체는 동일(경계·내용 변화 없음).
+      const chunksPerBlock = Math.max(1, Math.floor(HASH_READ_BLOCK_SIZE / chunkSize));
+      let blockBuf = new ArrayBuffer(0);
+      let blockStartChunk = 0;
+
       for (let i = 0; i < totalChunks; i++) {
-        const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
-        const buf = await slice.arrayBuffer();
+        if (i === blockStartChunk) {
+          const byteStart = i * chunkSize;
+          const byteEnd = Math.min(byteStart + chunksPerBlock * chunkSize, file.size);
+          blockBuf = await file.slice(byteStart, byteEnd).arrayBuffer();
+        }
+
+        const offsetInBlock = (i - blockStartChunk) * chunkSize;
+        const buf = blockBuf.slice(offsetInBlock, offsetInBlock + chunkSize);
         fileHasher?.update(new Uint8Array(buf));
         const hash = await sha256Hex(buf);
         hashes.push(hash);
+
+        if (i - blockStartChunk + 1 >= chunksPerBlock) {
+          blockStartChunk = i + 1;
+        }
       }
 
       const fileHash = fileHasher ? fileHasher.digestHex() : await computeFileHash(file);

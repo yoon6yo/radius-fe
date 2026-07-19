@@ -21,7 +21,7 @@ const PHASE_LABEL: Record<string, string> = {
 export default function Room() {
   const { token: urlToken } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const { rejoinByToken, leaveRoom } = useSignaling();
+  const { rejoinByToken, leaveRoom, leaveRoomSilently } = useSignaling();
   const [pinCopied, setPinCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const pinCopyTimerRef = useRef<number>(0);
@@ -66,6 +66,21 @@ export default function Room() {
   }, []);
 
   useBeforeUnload();
+
+  // 브라우저 뒤로가기/제스처처럼 버튼 클릭 없이 페이지를 벗어나는 경우까지 포함해,
+  // 방을 나갈 때는 항상 소켓 연결 해제 + 세션 삭제 + 스토어 초기화가 일어나야 한다.
+  // 이전에는 상단 "홈" 버튼이 navigate('/')만 호출하고 이 정리를 건너뛰어서, 뒤로가기로
+  // 나가도 소켓이 연결된 채 남아 서버 입장에서는 여전히 방에 있는 것처럼 보였다.
+  // navigate는 다시 부르지 않는다(leaveRoomSilently) — 이미 다른 경로로 라우트가 바뀐
+  // 뒤라 여기서 또 navigate('/')하면 사용자가 도착한 곳에서 홈으로 다시 끌려간다.
+  useEffect(() => {
+    return () => {
+      if (useRoomStore.getState().token) {
+        abortCurrent();
+        void leaveRoomSilently();
+      }
+    };
+  }, [abortCurrent, leaveRoomSilently]);
 
   useEffect(() => {
     if (urlToken && !token) void rejoinByToken(urlToken);
