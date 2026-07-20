@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { CHUNK_SIZE, PROGRESS_UPDATE_MS } from '@/constants/transfer';
 import { isValidFileMeta } from '@/lib/chunkUtils';
+import { SpeedTracker } from '@/lib/speedTracker';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useFileTransfer } from '@/hooks/useFileTransfer';
 import { useFileReceiver } from '@/hooks/useFileReceiver';
@@ -37,15 +38,19 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
   const { setChunkHashes, verifyChunkHash, verifyFileHash } = useReceiverHash();
 
   const onReceiverProgress = useCallback((fileId: string, received: number, total: number) => {
+    // 파일이 바뀌면 이전 파일의 속도 샘플이 새 파일의 이동평균/ETA에 섞이지 않도록 초기화
+    if (receiverProgressFileIdRef.current !== fileId) {
+      receiverProgressFileIdRef.current = fileId;
+      receiverSpeedTrackerRef.current.reset();
+      receiverProgressLastTimeRef.current = 0;
+    }
     const now = Date.now();
-    const last = receiverProgressLastRef.current;
     clearTimeout(receiverProgressTimerRef.current);
-    if (now - last.time >= PROGRESS_UPDATE_MS) {
-      const elapsed = (now - last.time) / 1000;
+    if (now - receiverProgressLastTimeRef.current >= PROGRESS_UPDATE_MS) {
+      receiverProgressLastTimeRef.current = now;
       const bytes = received * CHUNK_SIZE;
-      const speedBps = last.time > 0 && elapsed > 0 ? (bytes - last.bytes) / elapsed : 0;
+      const speedBps = receiverSpeedTrackerRef.current.record(now, bytes);
       const etaSeconds = speedBps > 0 ? ((total - received) * CHUNK_SIZE) / speedBps : 0;
-      receiverProgressLastRef.current = { time: now, bytes };
       updateProgress(fileId, { receivedChunks: received, speedBps, etaSeconds });
     } else {
       receiverProgressTimerRef.current = window.setTimeout(() => {
@@ -96,7 +101,9 @@ export function useRoomTransfer({ onChannelClose }: UseRoomTransferOptions = {})
     });
   }, []);
 
-  const receiverProgressLastRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
+  const receiverSpeedTrackerRef = useRef(new SpeedTracker());
+  const receiverProgressLastTimeRef = useRef(0);
+  const receiverProgressFileIdRef = useRef<string | null>(null);
   const receiverProgressTimerRef = useRef(0);
 
   const { computeHashes } = useSenderHash(

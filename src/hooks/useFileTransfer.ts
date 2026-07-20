@@ -9,6 +9,7 @@ import {
   VERIFY_ASSUMED_MIN_BPS,
 } from '@/constants/transfer';
 import { calcTotalChunks } from '@/lib/chunkUtils';
+import { SpeedTracker } from '@/lib/speedTracker';
 import type { PeerConnection } from '@/lib/webrtc';
 import type { ReadyMsg, ResumeMsg, QueuedFile, VerifyOk, VerifyFail } from '@/types/transfer';
 
@@ -21,7 +22,8 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
   const { role } = useRoomStore();
 
   const senderRef = useRef<FileSender | null>(null);
-  const lastProgressRef = useRef<{ time: number; bytes: number }>({ time: 0, bytes: 0 });
+  const lastProgressTimeRef = useRef(0);
+  const speedTrackerRef = useRef(new SpeedTracker());
 
   // fileId → readySignal resolver (HASH_DONE 후 READY/RESUME 대기)
   const readyResolversRef = useRef<Map<string, (indices: Set<number>) => void>>(new Map());
@@ -92,6 +94,9 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
         const fileHash = fileHashByFileId.get(item.fileId) ?? '';
         const totalChunks = calcTotalChunks(item.fileSize);
         updateProgress(item.fileId, { totalChunks });
+        // 이전 파일의 속도 샘플이 새 파일의 이동평균/ETA에 섞이지 않도록 초기화
+        speedTrackerRef.current.reset();
+        lastProgressTimeRef.current = 0;
 
         if (!item.file) break;
         await sender.sendFile(
@@ -144,16 +149,14 @@ export function useFileTransfer({ getPeerConnection }: UseFileTransferOptions) {
 
   const throttleProgress = (fileId: string, sent: number, totalChunks: number) => {
     const now = Date.now();
-    const last = lastProgressRef.current;
-    if (now - last.time < PROGRESS_UPDATE_MS) return;
+    if (now - lastProgressTimeRef.current < PROGRESS_UPDATE_MS) return;
+    lastProgressTimeRef.current = now;
 
     const bytesSent = sent * CHUNK_SIZE;
-    const elapsed = (now - last.time) / 1000;
-    const speedBps = elapsed > 0 ? (bytesSent - last.bytes) / elapsed : 0;
+    const speedBps = speedTrackerRef.current.record(now, bytesSent);
     const remaining = totalChunks - sent;
     const etaSeconds = speedBps > 0 ? (remaining * CHUNK_SIZE) / speedBps : 0;
 
-    lastProgressRef.current = { time: now, bytes: bytesSent };
     updateProgress(fileId, { sentChunks: sent, speedBps, etaSeconds });
   };
 

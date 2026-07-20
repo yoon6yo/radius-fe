@@ -1,7 +1,7 @@
 export const CHUNK_SIZE = 65536;                // 64KB
 export const BUFFER_HIGH_THRESHOLD = 1_048_576; // 1MB — 이 이상이면 전송 중단
 export const BUFFER_LOW_THRESHOLD  =   262_144; // 256KB — bufferedamountlow 임계값
-export const PROGRESS_UPDATE_MS    =       500; // UI 갱신 throttle 간격 (ms) — 100ms는 속도/남은시간 표시가 너무 빨리 바뀌어 어지럽다는 피드백으로 상향
+export const PROGRESS_UPDATE_MS    =       800; // UI 갱신 throttle 간격 (ms) — 100ms는 너무 빨랐고, 500ms도 여전히 빠르다는 피드백으로 재상향
 export const ROOM_TTL_MS           = 7_200_000; // 룸 만료 (7200초)
 export const TOKEN_PATTERN = /^\d{6}$/;
 
