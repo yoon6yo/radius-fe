@@ -174,7 +174,11 @@ export default function Room() {
         {/* 연결 상태 카드 */}
         <div className="bg-white rounded-2xl px-5 py-4 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
+            {/* 평소엔 그냥 상태 표시처럼 보이지만, 눌러보면 디버그 로그 뷰어가 뜬다 — 티 안 나게 */}
+            <div
+              className="flex items-center gap-2.5"
+              onClick={() => setShowLogViewer(true)}
+            >
               <StatusDot phase={isConnected ? 'peer_connected' : phase} />
               <span className="text-sm font-medium text-gray-900">
                 {isConnected ? 'P2P 연결됨' : PHASE_LABEL[phase] ?? phase}
@@ -201,33 +205,23 @@ export default function Room() {
             </p>
           )}
 
-          {/* 채널 드롭 경고 — 눌러서 디버그 로그 확인 가능 */}
+          {/* 채널 드롭 경고 — 눌러도 티 안 나지만 디버그 로그 뷰어가 뜬다 */}
           {channelDropped && !isConnected && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <button
-                onClick={() => setShowLogViewer(true)}
-                className="text-left w-full"
-              >
-                <p className="text-sm font-medium text-red-500 underline decoration-dotted">채널이 끊겼습니다</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  복구 중입니다. 탭을 닫지 마세요. (눌러서 로그 보기)
-                </p>
-              </button>
+            <div className="mt-3 pt-3 border-t border-gray-100" onClick={() => setShowLogViewer(true)}>
+              <p className="text-sm font-medium text-red-500">채널이 끊겼습니다</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                복구 중입니다. 탭을 닫지 마세요.
+              </p>
             </div>
           )}
 
-          {/* 상대방 네트워크 끊김 — 재연결 대기. 눌러서 디버그 로그 확인 가능 */}
+          {/* 상대방 네트워크 끊김 — 재연결 대기. 눌러도 티 안 나지만 디버그 로그 뷰어가 뜬다 */}
           {isDisconnected && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <button
-                onClick={() => setShowLogViewer(true)}
-                className="text-left w-full"
-              >
-                <p className="text-sm font-medium text-amber-600 underline decoration-dotted">상대방 연결이 끊겼습니다</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {remainingMin}분 안에 돌아오면 이어받을 수 있습니다 (눌러서 로그 보기)
-                </p>
-              </button>
+            <div className="mt-3 pt-3 border-t border-gray-100" onClick={() => setShowLogViewer(true)}>
+              <p className="text-sm font-medium text-amber-600">상대방 연결이 끊겼습니다</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {remainingMin}분 안에 돌아오면 이어받을 수 있습니다
+              </p>
             </div>
           )}
 
