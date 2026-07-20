@@ -6,6 +6,7 @@ import { useBeforeUnload } from '@/hooks/useBeforeUnload';
 import { useRoomStore } from '@/store/roomStore';
 import { useTransferStore } from '@/store/transferStore';
 import { TransferPanel } from '@/components/transfer/TransferPanel';
+import { LogViewerModal } from '@/components/ui/LogViewerModal';
 import { ROOM_TTL_MS } from '@/constants/transfer';
 
 const PHASE_LABEL: Record<string, string> = {
@@ -29,6 +30,7 @@ export default function Room() {
   const { token, role, phase, expiresAt, errorMessage } = useRoomStore();
   const { isLocked } = useTransferStore();
   const [channelDropped, setChannelDropped] = useState(false);
+  const [showLogViewer, setShowLogViewer] = useState(false);
 
   const handleChannelClose = useCallback(
     (reason: 'closed' | 'error') => {
@@ -199,23 +201,33 @@ export default function Room() {
             </p>
           )}
 
-          {/* 채널 드롭 경고 */}
+          {/* 채널 드롭 경고 — 눌러서 디버그 로그 확인 가능 */}
           {channelDropped && !isConnected && (
             <div className="mt-3 pt-3 border-t border-gray-100">
-              <p className="text-sm font-medium text-red-500">채널이 끊겼습니다</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                복구 중입니다. 탭을 닫지 마세요.
-              </p>
+              <button
+                onClick={() => setShowLogViewer(true)}
+                className="text-left w-full"
+              >
+                <p className="text-sm font-medium text-red-500 underline decoration-dotted">채널이 끊겼습니다</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  복구 중입니다. 탭을 닫지 마세요. (눌러서 로그 보기)
+                </p>
+              </button>
             </div>
           )}
 
-          {/* 상대방 네트워크 끊김 — 재연결 대기 */}
+          {/* 상대방 네트워크 끊김 — 재연결 대기. 눌러서 디버그 로그 확인 가능 */}
           {isDisconnected && (
             <div className="mt-3 pt-3 border-t border-gray-100">
-              <p className="text-sm font-medium text-amber-600">상대방 연결이 끊겼습니다</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {remainingMin}분 안에 돌아오면 이어받을 수 있습니다
-              </p>
+              <button
+                onClick={() => setShowLogViewer(true)}
+                className="text-left w-full"
+              >
+                <p className="text-sm font-medium text-amber-600 underline decoration-dotted">상대방 연결이 끊겼습니다</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {remainingMin}분 안에 돌아오면 이어받을 수 있습니다 (눌러서 로그 보기)
+                </p>
+              </button>
             </div>
           )}
 
@@ -246,6 +258,8 @@ export default function Room() {
           </div>
         )}
       </div>
+
+      {showLogViewer && <LogViewerModal onClose={() => setShowLogViewer(false)} />}
     </main>
   );
 }
