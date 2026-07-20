@@ -197,15 +197,20 @@ export function useSignaling() {
     [navigate, setIceServers, setPhase, setRoom],
   );
 
+  // "방 나가기" 버튼 등 명시적으로 방을 떠날 때만 쓴다. leave-room을 emit해서 상대방
+  // 화면을 "상대방이 나갔습니다"(peer_left, 되돌릴 수 없음)로 전환시키고, 이어받기
+  // 세션/기록도 전부 지운다 — 다시는 이어받을 수 없다는 걸 전제로 한 완전 종료.
   // navigate 없이 소켓 연결 해제 + 세션 삭제 + 스토어 초기화만 한다. 이미 다른 경로로
   // 라우트가 바뀐 뒤(예: 컴포넌트 언마운트 시점의 정리)에 호출될 수 있어서, 여기서
   // 또 navigate('/')를 부르면 사용자가 뒤로가기로 다른 곳에 도착했는데 홈으로 다시
   // 끌려가는 상황이 생길 수 있다 — 그래서 navigate는 leaveRoom에서만 명시적으로 한다.
   const leaveRoomSilently = useCallback(async () => {
     const currentToken = useRoomStore.getState().token;
+    console.log('[Signal] leaveRoomSilently (명시적 나가기) — token:', currentToken);
     if (currentToken) {
       socket.emit('leave-room');
       await deleteSession(currentToken);
+      console.log('[Signal] 세션 삭제 완료:', currentToken);
       // 세션을 지웠으니 이 토큰의 pending 전송은 다시는 이어받을 수 없음 — 정리
       void cleanupAbandonedTransfersForToken(currentToken);
     }
@@ -219,5 +224,22 @@ export function useSignaling() {
     void navigate('/');
   }, [navigate, leaveRoomSilently]);
 
-  return { createRoom, joinRoom, rejoinByToken, leaveRoom, leaveRoomSilently, token, role };
+  // Room 화면을 "그냥 벗어날 때"(홈 버튼, 브라우저 뒤로가기, 그 밖의 모든 언마운트 —
+  // 즉 "방 나가기"를 명시적으로 누르지 않은 모든 경우) 쓴다.
+  // leave-room은 절대 emit하지 않는다 — 이게 leaveRoomSilently와의 핵심 차이다.
+  // emit하면 서버가 상대에게 peer-left를 보내 상대 세션까지 삭제되고 "나갔습니다"
+  // 화면으로 바뀌어버려서, 잠깐 자리를 비운 것뿐인데 되돌릴 수 없게 된다.
+  // 소켓만 끊으면 서버는 그냥 disconnect로 처리해 상대에게 peer-disconnected(재연결
+  // 가능 상태)만 알린다. 세션/이어받기 기록도 그대로 남겨서 홈 화면의 "이어받기"
+  // 배너로 다시 들어올 수 있게 한다 — 예전엔 언마운트 시 무조건 세션을 지워서
+  // 이어받기 배너가 원천적으로 뜰 수 없었다.
+  const disconnectSilently = useCallback(() => {
+    const currentToken = useRoomStore.getState().token;
+    console.log('[Signal] disconnectSilently (그냥 벗어남, 세션은 유지) — token:', currentToken);
+    socket.disconnect();
+    useRoomStore.getState().reset();
+    useTransferStore.getState().reset();
+  }, []);
+
+  return { createRoom, joinRoom, rejoinByToken, leaveRoom, leaveRoomSilently, disconnectSilently, token, role };
 }

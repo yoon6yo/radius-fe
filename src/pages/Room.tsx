@@ -22,7 +22,7 @@ const PHASE_LABEL: Record<string, string> = {
 export default function Room() {
   const { token: urlToken } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const { rejoinByToken, leaveRoom, leaveRoomSilently } = useSignaling();
+  const { rejoinByToken, leaveRoom, disconnectSilently } = useSignaling();
   const [pinCopied, setPinCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const pinCopyTimerRef = useRef<number>(0);
@@ -69,20 +69,22 @@ export default function Room() {
 
   useBeforeUnload();
 
-  // 브라우저 뒤로가기/제스처처럼 버튼 클릭 없이 페이지를 벗어나는 경우까지 포함해,
-  // 방을 나갈 때는 항상 소켓 연결 해제 + 세션 삭제 + 스토어 초기화가 일어나야 한다.
-  // 이전에는 상단 "홈" 버튼이 navigate('/')만 호출하고 이 정리를 건너뛰어서, 뒤로가기로
-  // 나가도 소켓이 연결된 채 남아 서버 입장에서는 여전히 방에 있는 것처럼 보였다.
-  // navigate는 다시 부르지 않는다(leaveRoomSilently) — 이미 다른 경로로 라우트가 바뀐
-  // 뒤라 여기서 또 navigate('/')하면 사용자가 도착한 곳에서 홈으로 다시 끌려간다.
+  // 브라우저 뒤로가기/제스처, 상단 "홈" 버튼처럼 "방 나가기"를 명시적으로 누르지 않고
+  // 페이지를 벗어나는 모든 경우. 소켓 연결은 항상 끊는다 — 안 그러면 서버 입장에서는
+  // 여전히 방에 있는 것처럼 보여 상대방이 계속 기다리게 된다(예전 버그).
+  // 하지만 세션/이어받기 기록은 지우지 않는다(disconnectSilently, leaveRoomSilently와
+  // 다른 점) — 그래야 홈 화면에서 "이어받기" 배너로 다시 들어올 수 있다. 예전엔 여기서
+  // 세션까지 항상 지워서, 잠깐 홈에 갔다 오는 것만으로 이어받기가 원천 봉쇄돼 있었다.
+  // navigate는 다시 부르지 않는다 — 이미 다른 경로로 라우트가 바뀐 뒤라 여기서 또
+  // navigate('/')하면 사용자가 도착한 곳에서 홈으로 다시 끌려간다.
   useEffect(() => {
     return () => {
       if (useRoomStore.getState().token) {
         abortCurrent();
-        void leaveRoomSilently();
+        disconnectSilently();
       }
     };
-  }, [abortCurrent, leaveRoomSilently]);
+  }, [abortCurrent, disconnectSilently]);
 
   useEffect(() => {
     if (urlToken && !token) void rejoinByToken(urlToken);

@@ -173,26 +173,34 @@ export function useFileReceiver({
 
   // ── 전송 완료 처리 ──────────────────────────────────────────
   const handleTransferDone = async (msg: TransferDone) => {
+    console.log('[Receiver] TRANSFER_DONE:', msg.fileId, '— 남은 청크 큐 비우는 중');
     // TRANSFER_DONE 수신 시점에 아직 처리 중인 청크가 있을 수 있으므로 큐가 비워질 때까지 대기
     await chunkQueueRef.current;
 
     const meta = metaRef.current;
-    if (!meta || meta.fileId !== msg.fileId) return;
+    if (!meta || meta.fileId !== msg.fileId) {
+      console.warn('[Receiver] TRANSFER_DONE fileId 불일치 또는 meta 없음 — 무시:', msg.fileId, 'current meta:', meta?.fileId);
+      return;
+    }
 
+    console.log('[Receiver] 청크 큐 소진 완료, writer close 시작:', meta.fileName);
     setState((s) => ({ ...s, exportPhase: 'exporting' }));
 
     try {
       // close()를 try 안에서 실행 — OPFS 오류 시 VERIFY_FAIL 전송 가능
       await writerRef.current?.close();
       writerRef.current = null;
+      console.log('[Receiver] writer close 완료, 전체 파일 해시 검증 시작:', meta.fileName);
 
       const fileValid = await verifyFileHash(
         msg.fileId,
         meta.fileName,
         fileHashRef.current,
       );
+      console.log('[Receiver] 전체 파일 해시 검증 결과:', meta.fileName, 'valid:', fileValid);
 
       if (!fileValid) {
+        console.warn('[Receiver] 해시 불일치 — VERIFY_FAIL 전송, OPFS 삭제:', meta.fileName);
         sendControl({ type: 'VERIFY_FAIL', fileId: msg.fileId, reason: 'file_hash_mismatch' });
         setState((s) => ({
           ...s,
@@ -203,14 +211,18 @@ export function useFileReceiver({
         return;
       }
 
+      console.log('[Receiver] 해시 검증 통과, 다운로드로 내보내는 중:', meta.fileName);
       await exportFromOPFS(meta.fileName);
+      console.log('[Receiver] exportFromOPFS 반환됨(내보내기 자체는 성공 판단):', meta.fileName);
       await onTransferComplete?.(msg.fileId);
       sendControl({ type: 'VERIFY_OK', fileId: msg.fileId });
       setState((s) => ({ ...s, exportPhase: 'done' }));
       onFileDone?.(msg.fileId);
       await deleteFromOPFS(meta.fileName);
+      console.log('[Receiver] 전송 완료 처리 끝, OPFS 원본 삭제됨:', meta.fileName);
     } catch (err) {
       // OPFS 오류, 내보내기 실패, onTransferComplete 예외 — 모두 sender에게 알림
+      console.error('[Receiver] handleTransferDone 중 예외 발생:', meta.fileName, err);
       sendControl({ type: 'VERIFY_FAIL', fileId: msg.fileId, reason: 'file_hash_mismatch' });
       const errorMsg = err instanceof Error ? err.message : String(err);
       setState((s) => ({ ...s, exportPhase: 'error', exportError: errorMsg }));

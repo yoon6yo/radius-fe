@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useRoomStore } from '@/store/roomStore';
 import { socket } from '@/lib/socket';
+import { saveSession, getSession } from '@/lib/indexeddb';
 
 function getRegisteredHandler(event: string): ((...args: unknown[]) => void) | undefined {
   const call = (socket.on as ReturnType<typeof vi.fn>).mock.calls
@@ -59,5 +60,36 @@ describe('useSignaling — socket 재연결 시 자동 rejoin', () => {
     callback({ ok: true, role: 'answerer', peerConnected: true, expiresAt: Date.now() + 1000 });
 
     expect(useRoomStore.getState().phase).toBe('peer_connected');
+  });
+});
+
+describe('leaveRoomSilently vs disconnectSilently — 세션 삭제 여부 차이', () => {
+  it('leaveRoomSilently는 leave-room을 emit하고 세션을 지운다 (명시적 방 나가기)', async () => {
+    await saveSession({ token: '111111', role: 'offerer', expiresAt: Date.now() + 100_000 });
+    useRoomStore.getState().setRoom('111111', 'offerer', Date.now() + 100_000);
+
+    const { result } = renderHook(() => useSignaling(), { wrapper: MemoryRouter });
+    await act(async () => {
+      await result.current.leaveRoomSilently();
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('leave-room');
+    expect(await getSession('111111')).toBeNull();
+  });
+
+  it('disconnectSilently는 leave-room을 emit하지 않고 세션도 지우지 않는다 (그냥 화면 벗어남)', async () => {
+    await saveSession({ token: '222222', role: 'answerer', expiresAt: Date.now() + 100_000 });
+    useRoomStore.getState().setRoom('222222', 'answerer', Date.now() + 100_000);
+
+    const { result } = renderHook(() => useSignaling(), { wrapper: MemoryRouter });
+    act(() => {
+      result.current.disconnectSilently();
+    });
+
+    expect(socket.emit).not.toHaveBeenCalledWith('leave-room');
+    expect(socket.disconnect).toHaveBeenCalled();
+    expect(await getSession('222222')).not.toBeNull();
+    // 인메모리 룸 상태는 정리되지만(다음에 rejoinByToken이 새로 채움) 세션은 남아있어야 함
+    expect(useRoomStore.getState().token).toBeNull();
   });
 });

@@ -47,18 +47,22 @@ export async function exportFromOPFS(
   _mimeType = 'application/octet-stream',
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<void> {
+  console.log('[Export] start:', fileName);
   const root = await navigator.storage.getDirectory();
   const fileHandle = await root.getFileHandle(fileName);
   const file = await fileHandle.getFile();
+  console.log('[Export] OPFS file read:', fileName, 'size:', file.size, 'type:', JSON.stringify(file.type));
 
   onProgress?.(0, file.size);
 
   if (pendingExportUrl) {
+    console.log('[Export] revoking previous pending blob URL');
     URL.revokeObjectURL(pendingExportUrl);
   }
 
   const url = URL.createObjectURL(file);
   pendingExportUrl = url;
+  console.log('[Export] blob URL created, triggering download click:', fileName);
 
   const a = document.createElement('a');
   a.href = url;
@@ -67,6 +71,7 @@ export async function exportFromOPFS(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  console.log('[Export] download anchor clicked + removed:', fileName);
 
   onProgress?.(file.size, file.size);
 }
@@ -75,7 +80,9 @@ export async function deleteFromOPFS(fileName: string): Promise<void> {
   try {
     const root = await navigator.storage.getDirectory();
     await root.removeEntry(fileName);
-  } catch {
+    console.log('[Export] deleted from OPFS:', fileName);
+  } catch (err) {
     // 파일이 없어도 무시
+    console.warn('[Export] deleteFromOPFS failed (ignored):', fileName, err);
   }
 }
