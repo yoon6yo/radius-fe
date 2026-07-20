@@ -77,7 +77,7 @@ export class PeerConnection {
     };
 
     this.handleIceCandidate = async ({ candidate }: IceCandidatePayload) => {
-      console.log('[ICE] remote candidate received:', (candidate as RTCIceCandidateInit).candidate?.split(' ')[7]);
+      console.log('[ICE] remote candidate received:', (candidate as RTCIceCandidateInit).candidate);
       await this.pc.addIceCandidate(candidate);
     };
 
@@ -99,7 +99,10 @@ export class PeerConnection {
   private setupPeerConnectionListeners() {
     this.pc.onicecandidate = ({ candidate }) => {
       if (candidate) {
-        console.log('[ICE] local candidate:', candidate.type, candidate.protocol, candidate.address ?? '(hidden)');
+        // 전체 candidate 문자열(포트/priority/relay 여부의 related-address 등 포함)을 그대로 찍는다 —
+        // type/protocol/address만으로는 relay candidate가 실제로 만들어졌는지, 어떤 서버에서
+        // 왔는지 등을 진단할 수 없어서 문제 재현 시 로그만으로는 원인을 못 좁혔다.
+        console.log('[ICE] local candidate:', candidate.candidate);
         socket.emit('ice-candidate', { candidate: candidate.toJSON() });
       } else {
         console.log('[ICE] gathering complete');
@@ -107,12 +110,22 @@ export class PeerConnection {
     };
 
     this.pc.onicecandidateerror = (e) => {
-      console.warn('[ICE] candidate error:', (e as RTCPeerConnectionIceErrorEvent).errorCode, (e as RTCPeerConnectionIceErrorEvent).errorText);
+      const err = e as RTCPeerConnectionIceErrorEvent;
+      // url을 반드시 같이 찍는다 — 이게 있어야 STUN/TURN 여러 서버 중 정확히 어느 서버가
+      // 실패했는지(예: turn:rdrop.duckdns.org:3478) 구분할 수 있다. errorCode/Text만으로는
+      // "뭔가 하나 실패했다"까지만 알 수 있고 무엇이 실패했는지는 알 수 없었다.
+      console.warn(
+        '[ICE] candidate error:', err.errorCode, err.errorText,
+        'url:', err.url, 'local:', `${err.address}:${err.port}`,
+      );
     };
 
     this.pc.onconnectionstatechange = () => {
       console.log('[WebRTC] connection state:', this.pc.connectionState);
       this.onConnectionState(this.pc.connectionState);
+      if (this.pc.connectionState === 'failed') {
+        void this.logIceDiagnostics('connectionState=failed');
+      }
     };
 
     this.pc.oniceconnectionstatechange = () => {
@@ -122,6 +135,9 @@ export class PeerConnection {
         this.pc.iceConnectionState === 'failed'
       ) {
         console.warn('[ICE] restarting ICE');
+        if (this.pc.iceConnectionState === 'failed') {
+          void this.logIceDiagnostics('iceConnectionState=failed');
+        }
         this.pc.restartIce();
       }
     };
@@ -231,6 +247,42 @@ export class PeerConnection {
       }
     }
     return false;
+  }
+
+  // ICE 실패 시점의 getStats() 전체를 로그로 남긴다. 상태 전환 로그(checking→failed)만으로는
+  // "왜" 실패했는지(relay candidate가 애초에 안 만들어졌는지, host candidate pair가 시도조차
+  // 안 됐는지, 특정 pair가 timeout인지 등)를 알 수 없어서 사후 진단이 안 됐다 — 이 덤프가
+  // 있으면 로그만 보고 원인을 좁힐 수 있다.
+  private async logIceDiagnostics(context: string): Promise<void> {
+    try {
+      const stats = await this.pc.getStats();
+      const lines: string[] = [`[ICE] diagnostics (${context}):`];
+
+      stats.forEach((report) => {
+        if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+          const c = report as unknown as {
+            id: string; candidateType?: string; protocol?: string; address?: string; port?: number; url?: string;
+          };
+          lines.push(
+            `  ${report.type} id=${c.id} type=${c.candidateType} proto=${c.protocol} ` +
+            `${c.address ?? '?'}:${c.port ?? '?'} url=${c.url ?? '-'}`,
+          );
+        }
+        if (report.type === 'candidate-pair') {
+          const p = report as RTCIceCandidatePairStats;
+          lines.push(
+            `  candidate-pair id=${p.id} state=${p.state} nominated=${p.nominated} ` +
+            `local=${p.localCandidateId} remote=${p.remoteCandidateId} ` +
+            `bytesSent=${p.bytesSent ?? 0} bytesReceived=${p.bytesReceived ?? 0}`,
+          );
+        }
+      });
+
+      if (lines.length === 1) lines.push('  (candidate/candidate-pair 리포트 없음)');
+      console.warn(lines.join('\n'));
+    } catch (err) {
+      console.warn('[ICE] diagnostics 수집 실패:', err);
+    }
   }
 
   destroy() {

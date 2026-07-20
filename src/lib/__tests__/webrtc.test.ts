@@ -206,3 +206,32 @@ describe('destroy', () => {
     expect(mockPc.close).toHaveBeenCalled();
   });
 });
+
+describe('ICE 실패 진단 로그', () => {
+  it('iceConnectionState가 failed면 getStats() 기반 진단 로그를 남긴다', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createConnection('offerer');
+    mockPc.simulateIceState('failed');
+    // logIceDiagnostics는 getStats()를 await하므로 마이크로태스크 flush 필요
+    await new Promise((r) => setTimeout(r, 0));
+
+    const diagnosticsCall = warnSpy.mock.calls.find(([msg]) =>
+      typeof msg === 'string' && msg.includes('[ICE] diagnostics'),
+    );
+    expect(diagnosticsCall).toBeDefined();
+    warnSpy.mockRestore();
+  });
+
+  it('connectionState가 failed면 getStats() 기반 진단 로그를 남긴다', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createConnection('offerer');
+    mockPc.simulateConnectionState('failed');
+    await new Promise((r) => setTimeout(r, 0));
+
+    const diagnosticsCall = warnSpy.mock.calls.find(([msg]) =>
+      typeof msg === 'string' && msg.includes('[ICE] diagnostics'),
+    );
+    expect(diagnosticsCall).toBeDefined();
+    warnSpy.mockRestore();
+  });
+});
