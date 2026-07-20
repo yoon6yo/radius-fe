@@ -51,6 +51,39 @@ export function useSignaling() {
     };
   }, [setPhase]);
 
+  // 이미 방에 들어와 있는 상태에서 Socket.IO 트랜스포트가 끊겼다 자동 재연결되면
+  // (모바일 네트워크 전환/일시 순단 등), 서버는 이걸 새 연결로 취급해 새 socket.id를
+  // 발급한다 — 예전 socket.id는 서버 쪽 방(room)에서 자동으로 빠지고
+  // roomService.clearSocket()으로 offererSocketId/answererSocketId가 지워진다.
+  // 클라이언트 상태(store의 token/role)는 그대로 남아있어서 겉으로는 여전히 방에
+  // 있는 것처럼 보이지만, 서버 입장에선 더 이상 이 피어가 방에 없다 — 상대에게
+  // signaling(offer/answer/ice-candidate)이 전달되지 않고, 상대가 재입장해도
+  // peerConnected: false로 응답받아 "상대방 대기 중"에 고착된다.
+  // 페이지를 새로고침해야만 동작하는 rejoinByToken과 달리, 여기서는 소켓이 재연결될
+  // 때마다(최초 연결 포함) 이미 방에 있었는지 확인해서 필요하면 자동으로 rejoin을
+  // 다시 보내 서버 쪽 방 멤버십을 복구한다.
+  useEffect(() => {
+    const onSocketConnect = () => {
+      const { token: currentToken, role: currentRole } = useRoomStore.getState();
+      // 최초 연결 시점엔 setRoom()이 아직 호출되기 전이라 token이 비어있어 자연히 스킵된다 —
+      // create/join/rejoin 요청 자체가 각자의 흐름에서 처리하므로 여기서 중복 전송하지 않는다.
+      if (!currentToken || !currentRole) return;
+      console.log('[Signal] socket (re)connected while already in a room → re-sending rejoin');
+      socket.emit('rejoin', { token: currentToken, role: currentRole }, (result) => {
+        if (!result.ok) {
+          console.warn('[Signal] auto-rejoin after reconnect failed:', result.error);
+          return;
+        }
+        if (result.peerConnected) setPhase('peer_connected');
+      });
+    };
+
+    socket.on('connect', onSocketConnect);
+    return () => {
+      socket.off('connect', onSocketConnect);
+    };
+  }, [setPhase]);
+
   // ── 룸 생성 ─────────────────────────────────────────────────
   const createRoom = useCallback(async () => {
     resetTransfer();
