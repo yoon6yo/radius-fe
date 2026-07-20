@@ -34,6 +34,14 @@ export class OPFSFileWriter implements FileWriter {
 
 // ── OPFS 파일 → Blob 다운로드 내보내기 ──────────────────────
 
+// 직전 내보내기의 Blob URL — 바로 revoke하지 않고 다음 내보내기가 시작될 때(또는
+// 페이지를 벗어날 때) 회수한다. iOS Safari는 a.click() 이후 실제 blob 데이터를
+// 백그라운드에서 비동기로 읽어 Files 앱과 동기화하는데, 이 완료 시점을 JS에서
+// 알 방법이 없다. 예전엔 1초 뒤 고정 타이머로 revoke했는데, iOS가 아직 다 읽기
+// 전에 소스가 사라져서 다운로드가 Files 앱에 "대기 중..."으로 영원히 멈추는
+// 문제가 있었다(파일 크기와 무관하게 재현됨 — 큰 파일만의 문제가 아니었음).
+let pendingExportUrl: string | null = null;
+
 export async function exportFromOPFS(
   fileName: string,
   _mimeType = 'application/octet-stream',
@@ -45,20 +53,22 @@ export async function exportFromOPFS(
 
   onProgress?.(0, file.size);
 
+  if (pendingExportUrl) {
+    URL.revokeObjectURL(pendingExportUrl);
+  }
+
   const url = URL.createObjectURL(file);
+  pendingExportUrl = url;
+
   const a = document.createElement('a');
   a.href = url;
   a.download = fileName;
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
 
   onProgress?.(file.size, file.size);
-
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    document.body.removeChild(a);
-  }, 1000);
 }
 
 export async function deleteFromOPFS(fileName: string): Promise<void> {
